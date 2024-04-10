@@ -15,10 +15,10 @@ class MPMap:
     def _rotate_msh(self, dclock):
         pass
 
-    def _read_bmsh(self, cone, tilt):
+    def _read_bmsh(self, cone):
         return self.values  # just to get an ndarray, should read the grid instead
 
-    def _read_bmsp(self, cone, tilt):
+    def _read_bmsp(self, tilt):
         return self.values  # just to get an ndarray, should read the grid instead
 
     def set_clock(self, clock):
@@ -30,8 +30,8 @@ class MPMap:
 class ShearMap(MPMap):
     def __init__(self, clock, cone, tilt, **kwargs):
         super(ShearMap, self).__init__(clock, cone, tilt, **kwargs)
-        self._bmsh = self._read_bmsh(cone, tilt)
-        self._bmsp = self._read_bmsp(cone, tilt)
+        self._bmsh = self._read_bmsh(cone)
+        self._bmsp = self._read_bmsp(tilt)
         self.values = self._update()
 
     def _update(self):
@@ -43,8 +43,8 @@ class ShearMap(MPMap):
 class RateMap(MPMap):
     def __init__(self, clock, cone, tilt, **kwargs):
         super(RateMap, self).__init__(clock, cone, tilt, **kwargs)
-        self._bmsh = self._read_bmsh(cone, tilt)
-        self._bmsp = self._read_bmsh(cone, tilt)
+        self._bmsh = self._read_bmsh(cone)
+        self._bmsp = self._read_bmsp(tilt)
         self._nmsh = self._read_nmsh()
         self._nmsp = self._read_nmsp()
         self.values = self._update()
@@ -60,6 +60,6 @@ class RateMap(MPMap):
         return self.values
 
 
-class JMap(MPMap):
+class CurrentMap(MPMap):
     def __init__(self, clock, cone, tilt, **kwargs):
-        super(JMap, self).__init__(clock, cone, tilt, **kwargs)
+        super(CurrentMap, self).__init__(clock, cone, tilt, **kwargs)
