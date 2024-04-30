@@ -2,9 +2,11 @@ import numpy as np
 import pandas as pd
 from scipy import constants as cst
 from scipy.optimize import root
+from platformdirs import user_data_dir
 
 class MPMap:
     def __init__(self,  **kwargs):
+        self._grid_path = os.path.join(user_data_dir(), "mpmaps")
         self._clock = kwargs.get("clock", -90)
         self._cone = kwargs.get("cone", 55) 
         self._tilt = kwargs.get("tilt", 0) 
