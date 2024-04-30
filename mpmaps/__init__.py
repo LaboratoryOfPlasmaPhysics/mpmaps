@@ -30,5 +30,4 @@ for grid, url in grid_urls.items():
         print(f"file {dlpath} does not exist, downloading {url} --> {dlpath}\n")
         urllib.request.urlretrieve(url, dlpath)
 
-    else:
-        print(f"file {dlpath} exists\n")
+    
