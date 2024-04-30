@@ -3,6 +3,8 @@ import pandas as pd
 from scipy import constants as cst
 from scipy.optimize import root
 from platformdirs import user_data_dir
+from . import grids
+import os
 
 class MPMap:
     def __init__(self,  **kwargs):
@@ -15,16 +17,16 @@ class MPMap:
         self._mp_thick = kwargs.get("mp_thick", 800)
         self._ny = 401  # hard coded for now just to declare values
         self._nz = 401
-        self._Xmp, self._Ymp, self._Zmp, self._theta, self._phi = pd.read_pickle('mp_coordinates.pkl').values() 
+        self._Xmp, self._Ymp, self._Zmp, self._theta, self._phi = pd.read_pickle(os.path.join(self._grid_path, grids[0])).values() # 'mp_coordinates.pkl'
         self.Y, self.Z  = np.meshgrid(np.linspace(-22,22,self._ny),np.linspace(-22,22,self._nz),indexing='xy') # hard coded for now 
         self.X = regular_grid_interpolation(self._Ymp, self._Zmp, self._Xmp, self.Y, self.Z)
-        self._grid_bmsp = pd.read_pickle('mp_b_msp.pkl')
+        self._grid_bmsp = pd.read_pickle(os.path.join(self._grid_path, grids[1])) #'mp_b_msp.pkl'
         self.bmsp = self._grid_bmsp[str(self._tilt)]
-        self._grid_bmsh = pd.read_pickle('mp_b_msh.pkl')
-        self.bmsh = self._processing_bmsh()
-        self._grid_nmsp = pd.read_pickle('mp_np_msp.pkl')
+        self._grid_bmsh = pd.read_pickle(os.path.join(self._grid_path, grids[2])) # 'mp_b_msh.pkl'
+        self.bmsh = self._processing_bmsh() 
+        self._grid_nmsp = pd.read_pickle(os.path.join(self._grid_path, grids[3])) # 'mp_np_msp.pkl'
         self.nmsp = self._grid_nmsp[str(self._tilt)]
-        self._grid_nmsh = pd.read_pickle('mp_np_msh.pkl')
+        self._grid_nmsh = pd.read_pickle(os.path.join(self._grid_path, grids[4])) # 'mp_np_msh.pkl'
         self.nmsh = self._processing_nmsh()
         self.parameters =  {'IMF clock angle (°)': self._clock, 'IMF cone angle (°)': self._cone, 'Dipole tilt angle (°)': self._tilt, 
                             'IMF magnitude (nT)' :  self._bimf, 'Solar wind plasma density (cm-3)': self._nsw , 
