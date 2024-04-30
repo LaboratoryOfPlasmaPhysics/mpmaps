@@ -1,65 +1,191 @@
-import numpy as np
-
+import numpy as np 
+import pandas as pd
+from scipy import constants as cst
+from scipy.optimize import root
 
 class MPMap:
-    def __init__(self, clock, cone, tilt, **kwargs):
-        self._clock = clock
-        self._cone = cone
-        self._tilt = tilt
+    def __init__(self,  **kwargs):
+        self._clock = kwargs.get("clock", -90)
+        self._cone = kwargs.get("cone", 55) 
+        self._tilt = kwargs.get("tilt", 0) 
         self._bimf = kwargs.get("bimf", 5)
         self._nsw = kwargs.get("nsw", 5)
-        self.ny = 400  # hard coded for now just to declare values
-        self.nz = 400
-        self.values = np.zeros((self.ny, self.nz))
+        self._mp_thick = kwargs.get("mp_thick", 800)
+        self._ny = 401  # hard coded for now just to declare values
+        self._nz = 401
+        self._Xmp, self._Ymp, self._Zmp, self._theta, self._phi = pd.read_pickle('mp_coordinates.pkl').values() 
+        self.Y, self.Z  = np.meshgrid(np.linspace(-22,22,self._ny),np.linspace(-22,22,self._nz),indexing='xy') # hard coded for now 
+        self.X = regular_grid_interpolation(self._Ymp, self._Zmp, self._Xmp, self.Y, self.Z)
+        self._grid_bmsp = pd.read_pickle('mp_b_msp.pkl')
+        self.bmsp = self._grid_bmsp[str(self._tilt)]
+        self._grid_bmsh = pd.read_pickle('mp_b_msh.pkl')
+        self.bmsh = self._processing_bmsh()
+        self._grid_nmsp = pd.read_pickle('mp_np_msp.pkl')
+        self.nmsp = self._grid_nmsp[str(self._tilt)]
+        self._grid_nmsh = pd.read_pickle('mp_np_msh.pkl')
+        self.nmsh = self._processing_nmsh()
+        self.parameters =  {'IMF clock angle (°)': self._clock, 'IMF cone angle (°)': self._cone, 'Dipole tilt angle (°)': self._tilt, 
+                            'IMF magnitude (nT)' :  self._bimf, 'Solar wind plasma density (cm-3)': self._nsw , 
+                            'Magnetopause thickness (km)': self._mp_thick  }
 
-    def _rotate_msh(self, dclock):
-        pass
 
-    def _read_bmsh(self, cone):
-        return self.values  # just to get an ndarray, should read the grid instead
+    def _processing_bmsh(self):
+        bxmsh, bymsh, bzmsh  = self._grid_bmsh[str(abs(self._cone))]
+        if self._cone<0:
+            bxmsh, bymsh, bzmsh = self._bmsh_for_negative_cone_angle(bxmsh, bymsh, bzmsh)
+        bxmsh,bymsh,bzmsh = self._rotates_bmsh(bxmsh,bymsh,bzmsh)
+        bxmsh,bymsh,bzmsh = [nan_gaussian_filter(b,(20,20)) for b in [bxmsh,bymsh,bzmsh]]
+        bxmsh,bymsh,bzmsh = self._remove_normal_to_shue98(bxmsh,bymsh,bzmsh)
+        bxmsh,bymsh,bzmsh = [b*self._bimf for b in [bxmsh,bymsh,bzmsh]]
+        return bxmsh, bymsh, bzmsh
 
-    def _read_bmsp(self, tilt):
-        return self.values  # just to get an ndarray, should read the grid instead
+    def _bmsh_for_negative_cone_angle(self, bxmsh, bymsh, bzmsh):
+        bxmsh, bzmsh = [regular_grid_interpolation(-self._Ymp, self._Zmp,[-b], self._Ymp, self._Zmp) for b in [bxmsh, bzmsh]]
+        return bxmsh, bymsh, bzmsh
+    
+    def _rotates_bmsh(self, bxmsh, bymsh, bzmsh):
+        rotation_angle = np.radians(self._clock) - np.pi/2 # pi/2 for standard orientation of 
+        new_xmp,new_ymp,new_zmp = rotates_from_phi_angle(self._Xmp, self._Ymp, self._Zmp,rotation_angle)
+        bx_new, by_new, bz_new = rotates_from_phi_angle(bxmsh, bymsh, bzmsh,rotation_angle)
+        bxmsh,bymsh,bzmsh = [regular_grid_interpolation(new_ymp,new_zmp, b ,self.Y,self.Z) for b in [bx_new, by_new, bz_new]]
+        return bxmsh, bymsh, bzmsh
+
+    def _remove_normal_to_shue98(self, bxmsh,bymsh,bzmsh):
+        theta,phi = scc.cartesian_to_spherical(self.X,self.Y,self.Z)[1:]
+        nx,ny,nz = smp.mp_shue1998_normal(theta,phi)
+        bn = nx*bxmsh+ny*bymsh+nz*bzmsh
+        return bxmsh-bn*nx,bymsh-bn*ny,bzmsh-bn*nz
+
+    def _processing_nmsh(self):
+        nmsh = self._grid_nmsh[str(abs(self._cone))]
+        if self._cone<0:
+            nmsh = regular_grid_interpolation(-self._Ymp, self._Zmp, nmsh, self._Ymp, self._Zmp)
+        nmsh = self._rotates_nmsh(nmsh)
+        nmsh = nan_gaussian_filter(nmsh,(20,20)) 
+        nmsh = nmsh*self._nsw
+        return nmsh
+
+    def _rotates_nmsh(self, nmsh):
+        rotation_angle = np.radians(self._clock) - np.pi/2 # pi/2 for standard orientation of 
+        new_xmp,new_ymp,new_zmp = rotates_from_phi_angle(self._Xmp, self._Ymp, self._Zmp,rotation_angle)
+        return regular_grid_interpolation(new_ymp,new_zmp, nmsh ,self.Y,self.Z)
+
+    def set_parameters(self, **kwargs):
+        if 'tilt' in kwargs:
+            self._tilt = kwargs['tilt']
+            self.parameters['Dipole tilt angle (°)'] = self._tilt
+            self.bmsp = self._grid_bmsp[str(self._tilt)]
+        if ('clock'  in kwargs) or ('cone' in kwargs) :
+            if kwargs['clock']:
+                self._clock = kwargs['clock']
+                self.parameters['IMF clock angle (°)'] = self._clock
+            if 'cone' in kwargs:
+                self._cone = kwargs['cone']
+                self.parameters['IMF cone angle (°)'] = self._cone
+            self.bmsh = self._processing_bmsh()
+            self.nmsh = self._processing_nmsh()
+        if 'bimf' in kwargs:
+            self._bimf = kwargs['bimf']
+        if 'nsw' in kwargs:
+            self._bimf = kwargs['nsw']
+        if 'mp_thick' in kwargs:
+            self._bimf = kwargs['mp_thick']
+
+    def set_tilt(self, tilt):
+        self._tilt = tilt
+        self.bmsp = self._grid_bmsp[str(self._tilt)]
+        self.nmsp = self._grid_nmsp[str(self._tilt)]
+        self.parameters['Dipole tilt angle (°)'] = self._tilt
+
 
     def set_clock(self, clock):
-        self._rotate_msh(self._clock - clock)
-        self._update()
         self._clock = clock
+        self.bmsh = self._processing_bmsh()
+        self.nmsh = self._processing_nmsh()
+        self.parameters['IMF clock angle (°)'] = self._clock
+
+    def set_cone(self, cone):
+        self._cone = cone
+        self.bmsh = self._processing_bmsh()
+        self.nmsh = self._processing_nmsh()
+        self.parameters['IMF cone angle (°)'] = self._cone        
+        
+
+    def shear_angle(self):
+        Bxmsp, Bymsp, Bzmsp = self.bmsp
+        Bxmsh, Bymsh, Bzmsh = self.bmsh
+        dp = Bxmsh * Bxmsp + Bymsh * Bymsp + Bzmsh * Bzmsp
+        Bmsh = sm.norm(Bxmsh, Bymsh, Bzmsh)
+        Bmsp = sm.norm(Bxmsp,Bymsp,Bzmsp)
+        shear = np.degrees(np.arccos(dp / (Bmsh * Bmsp)))
+        self._shear = shear
+        return shear
+
+    def current_density(self):
+        bxmsp,bymsp,bzmsp = self.bmsp
+        bxmsh,bymsh,bzmsh = self.bmsh
+        bmsp_norm = sm.norm(bxmsp,bymsp,bzmsp)
+        lx,ly,lz = bxmsp/bmsp_norm,bymsp/bmsp_norm,bzmsp/bmsp_norm
+        Blmsh = bxmsh*lx + bymsh*ly + bzmsh*lz
+        Blmsp = bxmsp*lx + bymsp*ly + bzmsp*lz
+        th,ph = scc.cartesian_to_spherical(self.X,self.Y,self.Z)[1:]
+        nx,ny,nz = smp.mp_shue1998_normal(th,ph)
+        mx,my,mz = np.cross(np.asarray([nx,ny,nz]).T,np.asarray([lx,ly,lz]).T).T
+        Bmmsh = bxmsh*mx + bymsh*my + bzmsh*mz
+        Bmmsp = bxmsp*mx + bymsp*my + bzmsp*mz
+        jl=-(Bmmsh-Bmmsp)*1e-9/(cst.mu_0*self._mp_thick*1e3)
+        jm=(Blmsh-Blmsp)*1e-9/(cst.mu_0*self._mp_thick*1e3)
+        jj= sm.norm(0,jl,jm)*1e9
+        jx = (jm*mx+jl*lx)*1e9
+        jy = (jm*my+jl*ly)*1e9
+        jz = (jm*mz+jl*lz)*1e9
+        return jj,jx,jy,jz
 
 
-class ShearMap(MPMap):
-    def __init__(self, clock, cone, tilt, **kwargs):
-        super(ShearMap, self).__init__(clock, cone, tilt, **kwargs)
-        self._bmsh = self._read_bmsh(cone)
-        self._bmsp = self._read_bmsp(tilt)
-        self.values = self._update()
 
-    def _update(self):
-        print("updating shear")
-        # return compute the angle from self._bmsh and self._bmsp
-        return self.values  # just to return something for now
+    def reconnection_rate(self, rec_angle = 'max_rate' ):
+        alpha = self.shear_angle()
+        n1 = self.nmsp*1e6*cst.m_p
+        n2 = self.nmsh*1e6*cst.m_p
+        B1 =  sm.norm(*self.bmsp)*1e-9
+        B2 =  sm.norm(*self.bmsh)*1e-9
+        k = 2*0.1*1e3/np.sqrt(cst.mu_0)
 
+        if rec_angle == "max_rate":
+            theta = self._find_rec_angle_max_rate()
+        elif rec_angle == "bisection":
+            theta = alpha/2
+        
+        b1 = B1*np.sin(np.radians(theta))
+        b2 = B2*np.sin(np.radians(alpha-theta))        
+        u = (b1*b2)**(3/2)
+        v =  np.sqrt((b2*n1+b1*n2)*(b1+b2))
+        R= k*u/v
+        return R
 
-class RateMap(MPMap):
-    def __init__(self, clock, cone, tilt, **kwargs):
-        super(RateMap, self).__init__(clock, cone, tilt, **kwargs)
-        self._bmsh = self._read_bmsh(cone)
-        self._bmsp = self._read_bmsp(tilt)
-        self._nmsh = self._read_nmsh()
-        self._nmsp = self._read_nmsp()
-        self.values = self._update()
-
-    def _read_nmsh(self):
-        return self.values  # just to get an ndarray, should read the grid instead
-
-    def _read_nmsp(self):
-        return self.values  # just to get an ndarray, should read the grid instead
-
-    def _update(self):
-        print("updating rate")
-        return self.values
-
-
-class CurrentMap(MPMap):
-    def __init__(self, clock, cone, tilt, **kwargs):
-        super(CurrentMap, self).__init__(clock, cone, tilt, **kwargs)
+    def _find_rec_angle_max_rate(self):
+        def _dRR_dtheta_local(theta,params):
+            n1 = params[:,0]*1e6*cst.m_p
+            n2 = params[:,1]*1e6*cst.m_p
+            B1 =  sm.norm(params[:,2],params[:,3],params[:,4])*1e-9
+            B2 =  sm.norm(params[:,5],params[:,6],params[:,7])*1e-9
+            alpha = parameters[:,-1]
+            k = 2*0.1*1e3/np.sqrt(cst.mu_0)
+            b1 = B1* np.sin(np.radians(theta))
+            b2 = B2*np.sin(np.radians(alpha-theta))
+            b1p = B1*np.cos(np.radians(theta))
+            b2p = -B2*np.cos(np.radians(alpha-theta))
+            b1b2p = b1p*b2 +  b2p*b1
+            u = (b1*b2)**(3/2)
+            v = np.sqrt((b2*n1+b1*n2)*(b1+b2))
+            up = 3/2*b1b2p*np.sqrt( b1 * b2 )
+            vp = (2*b1*b1p*n2+2*b2*b2p*n1+((b1b2p)*(n1+n2)))/(2*v)
+            Rp=k *(up*v -vp*u)/(v**2 )
+            return Rp
+        alpha = self.shear_angle()
+        parameters,old_shape = reshape_to_2Darrays([self.nmsp,self.nmsh,self.bmsp[0],self.bmsp[1],self.bmsp[2],self.bmsh[0],self.bmsh[1],self.bmsh[2],alpha])
+        rt = root(_dRR_dtheta_local,x0=parameters[:,-1]/2,args=parameters, method='krylov')
+        theta = reshape_to_original_shape(rt.x,(1,old_shape[1],old_shape[2]))[0]
+        if np.sum(rt.success==0)!=0:
+            print('Convergence problem')
+        return theta
