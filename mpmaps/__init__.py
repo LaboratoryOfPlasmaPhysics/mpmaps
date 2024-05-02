@@ -3,6 +3,9 @@ from platformdirs import user_data_dir
 import urllib.request
 import os
 
+from .mpmaps import MPMap
+
+
 data_dir = os.path.join(user_data_dir(), "mpmaps")
 
 grids = [
@@ -29,5 +32,3 @@ for grid, url in grid_urls.items():
             os.mkdir(data_dir)
         print(f"file {dlpath} does not exist, downloading {url} --> {dlpath}\n")
         urllib.request.urlretrieve(url, dlpath)
-
-    
