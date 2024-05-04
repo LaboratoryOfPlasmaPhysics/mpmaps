@@ -4,7 +4,7 @@ requires = ["flit_core"]
 
 [project]
 name = "mpmaps"
-version = "0.1.1"
+version = "0.1.2"
 description = "magnetopause maps"
 keywords = ["space", "plasma-physics"]
 authors = [
