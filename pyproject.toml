@@ -33,7 +33,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["pandas", "numpy", "matplotlib", "scipy"]
+dependencies = ["pandas", "numpy", "matplotlib", "scipy", "spok"]
 [project.urls]
 homepage = "https://github.com/LaboratoryOfPlasmaPhysics/mpmaps"
 

@@ -1,4 +1,7 @@
-from pathlib import Path
+__author__ = """Nicolas Aunai"""
+__email__ = "nicolas.aunai@lpp.polytechnique.fr"
+__version__ = '0.1.0'
+
 from platformdirs import user_data_dir
 import urllib.request
 import os

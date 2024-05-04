@@ -93,5 +93,7 @@ values = mpm.current_density()
 
 ## Credits
 
+We acknowledge support from:
 
-This package was created with [Cookiecutter](https://github.com/audreyr/cookiecutter) and the [audreyr/cookiecutter-pypackage](https://github.com/audreyr/cookiecutter-pypackage) project template.
+-  The space plasma team of the [Laboratory of Plasma Physics](https://www.lpp.polytechnique.fr)
+
