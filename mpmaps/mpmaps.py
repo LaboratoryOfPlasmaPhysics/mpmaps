@@ -5,6 +5,7 @@ from scipy.optimize import root
 from platformdirs import user_data_dir
 from .globals import grids
 import os
+import matplotlib.pyplot as plt
 
 
 from spok.models import planetary as smp
@@ -213,6 +214,50 @@ class MPMap:
         v = np.sqrt((b2 * n1 + b1 * n2) * (b1 + b2))
         R = k * u / v
         return R
+
+    def plot(self, **kwargs):
+        """
+        Keyword arguments
+        -----------------
+
+        value :
+
+        example : mp.plot(value="shear_angle", tilt=14, xlim=(-18,18), ylim=(-18,18))
+        """
+
+        if "ax" in kwargs:
+            ax = kwargs["ax"]
+            fig = ax.get_figure()
+        else:
+            fig, ax = plt.subplots()
+
+        msh = smp.Magnetosheath()
+        phi = np.arange(0, np.pi * 2 + 0.1, 0.1)
+        theta = np.pi / 2
+        _, y, z = msh.magnetopause(theta, phi)
+        ax.plot(y, z, ls="--", color="k")
+
+        xmin, xmax = kwargs.get("xlim", (self.Y.min(), self.Y.max()))
+        ymin, ymax = kwargs.get("ylim", (self.Z.min(), self.Z.max()))
+
+        ax.set_xlim((xmin, xmax))
+        ax.set_ylim((ymin, ymax))
+        ax.set_xlabel(r"$Y/R_e$")
+        ax.set_ylabel(r"$Z/R_e$")
+
+        self.set_parameters(**kwargs)
+        val = kwargs.get("value", "shear_angle")
+        sa = getattr(self, val)()
+
+        ax.pcolormesh(self.Y, self.Z, sa, cmap="jet")
+        ax.axvline(0, ls="--", color="k")
+        ax.axhline(0, ls="--", color="k")
+        ax.set_aspect("equal")
+
+        if "filename" in kwargs:
+            fig.savefig(kwargs["filename"])
+
+        return fig, ax
 
     def _find_rec_angle_max_rate(self):
         def _dRR_dtheta_local(theta, params):
