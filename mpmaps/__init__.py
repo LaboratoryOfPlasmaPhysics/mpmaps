@@ -1,23 +1,17 @@
 __author__ = """Nicolas Aunai"""
 __email__ = "nicolas.aunai@lpp.polytechnique.fr"
-__version__ = '0.1.1'
+__version__ = "0.1.1"
 
 from platformdirs import user_data_dir
 import urllib.request
 import os
 
 from .mpmaps import MPMap
+from .globals import grids
 
 
 data_dir = os.path.join(user_data_dir(), "mpmaps")
 
-grids = [
-    "mp_coordinates.pkl",
-    "mp_b_msp.pkl",
-    "mp_b_msh.pkl",
-    "mp_np_msp.pkl",
-    "mp_np_msh.pkl",
-]
 
 base_url = "https://hephaistos.lpp.polytechnique.fr/data/mpmaps_grids"
 
