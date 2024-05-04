@@ -16,6 +16,29 @@ from spok import utils as su
 
 class MPMap:
     def __init__(self, **kwargs):
+        """
+        Keyword arguments:
+        ------------------
+
+        clock: float, (default:-90)
+                IMF clock angle in degrees, 0 is due north
+
+        cone: float, (default: 55)
+                IMF cone angle in degrees, 0 is radial IMF
+
+        tilt: float, (default: 0)
+                Dipole tilt axis
+
+        bimf: float, (default: 5)
+                IMF amplitude in nT
+
+        nws: float (default 5)
+                solar wind density, in cm^-3
+
+        mp_thick: float, (default 800)
+                Magnetopause thickness in km
+                only used for computing the current density
+        """
         self._grid_path = os.path.join(user_data_dir(), "mpmaps")
         self._clock = kwargs.get("clock", -90)
         self._cone = kwargs.get("cone", 55)
@@ -220,7 +243,14 @@ class MPMap:
         Keyword arguments
         -----------------
 
-        value :
+        value : string ("shear_angle":default, "reconnection_rate", "current_density")
+                the quantity that is plotted
+
+        xlim : tuple, lower bound of the plot area
+        ylim : tuple, upper bound of the plot area
+        filename : string, file name to save the figure on disk
+
+        other keywork arguments: see MPMap
 
         example : mp.plot(value="shear_angle", tilt=14, xlim=(-18,18), ylim=(-18,18))
         """
