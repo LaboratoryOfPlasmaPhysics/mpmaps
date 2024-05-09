@@ -46,43 +46,66 @@ class MPMap:
         self._bimf = kwargs.get("bimf", 5)
         self._nsw = kwargs.get("nsw", 5)
         self._mp_thick = kwargs.get("mp_thick", 800)
-        self._ny = 401  # hard coded for now just to declare values
-        self._nz = 401
+
         self._Xmp, self._Ymp, self._Zmp, self._theta, self._phi = pd.read_pickle(
             os.path.join(self._grid_path, grids[0])
         ).values()  # 'mp_coordinates.pkl'
-        self.Y, self.Z = np.meshgrid(
-            np.linspace(-22, 22, self._ny),
-            np.linspace(-22, 22, self._nz),
-            indexing="xy",
-        )  # hard coded for now
-        self.X = su.regular_grid_interpolation(
-            self._Ymp, self._Zmp, self._Xmp, self.Y, self.Z
-        )
+
+        self._build_map_grid()
+
         self._grid_bmsp = pd.read_pickle(
             os.path.join(self._grid_path, grids[1])
         )  #'mp_b_msp.pkl'
         self.bmsp = self._grid_bmsp[str(self._tilt)]
+
         self._grid_bmsh = pd.read_pickle(
             os.path.join(self._grid_path, grids[2])
         )  # 'mp_b_msh.pkl'
         self.bmsh = self._processing_bmsh()
+
         self._grid_nmsp = pd.read_pickle(
             os.path.join(self._grid_path, grids[3])
         )  # 'mp_np_msp.pkl'
         self.nmsp = self._grid_nmsp[str(self._tilt)]
+
         self._grid_nmsh = pd.read_pickle(
             os.path.join(self._grid_path, grids[4])
         )  # 'mp_np_msh.pkl'
         self.nmsh = self._processing_nmsh()
-        self.parameters = {
-            "IMF clock angle (°)": self._clock,
-            "IMF cone angle (°)": self._cone,
-            "Dipole tilt angle (°)": self._tilt,
-            "IMF magnitude (nT)": self._bimf,
-            "Solar wind plasma density (cm-3)": self._nsw,
-            "Magnetopause thickness (km)": self._mp_thick,
-        }
+
+        def __repr__(self):
+            return f"""IMF clock angle     : {self._clock}
+IMF cone angle     (°) : {self._cone}
+Dipole tilt angle  (°) : {self._tilt}
+IMF amplitude (nT)     : {self._bimf}
+Solar wind particle density : {self._nsw}
+Magnetopause thickness : {self._mp_thick}
+                     """
+
+    def _build_map_grid(self):
+        """
+        build the final map coordinates (2D)
+        these are cartesian coords with uniform
+        spacing in Y and Z.
+        X is obtained for each Yi,Zi by interpolating
+        the Xmp=(Ymp,Zmp) representing the cartesian
+        coordinates from the uniform spherical coords
+        of the magnetopause model
+        """
+        self._ny = 401
+        self._nz = 401
+        self._ymin = -22
+        self._ymax = 22
+        self._zmin = -22
+        self._zmax = 22
+        self.Y, self.Z = np.meshgrid(
+            np.linspace(self._ymin, self._ymax, self._ny),
+            np.linspace(self._zmin, self._zmax, self._nz),
+            indexing="xy",
+        )
+        self.X = su.regular_grid_interpolation(
+            self._Ymp, self._Zmp, self._Xmp, self.Y, self.Z
+        )
 
     def _processing_bmsh(self):
         bxmsh, bymsh, bzmsh = self._grid_bmsh[str(abs(self._cone))]
@@ -152,15 +175,12 @@ class MPMap:
     def set_parameters(self, **kwargs):
         if "tilt" in kwargs:
             self._tilt = kwargs["tilt"]
-            self.parameters["Dipole tilt angle (°)"] = self._tilt
             self.bmsp = self._grid_bmsp[str(self._tilt)]
         if ("clock" in kwargs) or ("cone" in kwargs):
             if kwargs["clock"]:
                 self._clock = kwargs["clock"]
-                self.parameters["IMF clock angle (°)"] = self._clock
             if "cone" in kwargs:
                 self._cone = kwargs["cone"]
-                self.parameters["IMF cone angle (°)"] = self._cone
             self.bmsh = self._processing_bmsh()
             self.nmsh = self._processing_nmsh()
         if "bimf" in kwargs:
@@ -174,19 +194,16 @@ class MPMap:
         self._tilt = tilt
         self.bmsp = self._grid_bmsp[str(self._tilt)]
         self.nmsp = self._grid_nmsp[str(self._tilt)]
-        self.parameters["Dipole tilt angle (°)"] = self._tilt
 
     def set_clock(self, clock):
         self._clock = clock
         self.bmsh = self._processing_bmsh()
         self.nmsh = self._processing_nmsh()
-        self.parameters["IMF clock angle (°)"] = self._clock
 
     def set_cone(self, cone):
         self._cone = cone
         self.bmsh = self._processing_bmsh()
         self.nmsh = self._processing_nmsh()
-        self.parameters["IMF cone angle (°)"] = self._cone
 
     def shear_angle(self):
         Bxmsp, Bymsp, Bzmsp = self.bmsp
