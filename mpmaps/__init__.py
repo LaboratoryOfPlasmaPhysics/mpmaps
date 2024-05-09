@@ -1,6 +1,6 @@
 __author__ = """Nicolas Aunai"""
 __email__ = "nicolas.aunai@lpp.polytechnique.fr"
-__version__ = '0.1.2'
+__version__ = '0.2.0'
 
 from platformdirs import user_data_dir
 import urllib.request
