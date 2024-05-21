@@ -75,12 +75,12 @@ class MPMap:
 
         def __repr__(self):
             return f"""IMF clock angle     : {self._clock}
-IMF cone angle     (°) : {self._cone}
-Dipole tilt angle  (°) : {self._tilt}
-IMF amplitude (nT)     : {self._bimf}
-Solar wind particle density : {self._nsw}
-Magnetopause thickness : {self._mp_thick}
-                     """
+                    IMF cone angle     (°) : {self._cone}
+                    Dipole tilt angle  (°) : {self._tilt}
+                    IMF amplitude (nT)     : {self._bimf}
+                    Solar wind particle density : {self._nsw}
+                    Magnetopause thickness : {self._mp_thick}
+                                         """
 
     def _build_map_grid(self):
         """
@@ -186,16 +186,13 @@ Magnetopause thickness : {self._mp_thick}
         if ("bimf" in kwargs) and (self._bimf != kwargs["bimf"]):
             self.bmsh = [b / self._bimf for b in self.bmsh]
             self._bimf = kwargs["bimf"]
-            self.parameters["IMF magnitude (nT)"] = self._bimf
             self.bmsh = [b * self._bimf for b in self.bmsh] 
         if ("nsw" in kwargs) and (self._nsw != kwargs["nsw"]):
             self.nmsh = self.nmsh / self._nsw
             self._nsw = kwargs["nsw"]
-            self.parameters["Solar wind plasma density (cm-3)"] = self._nsw
             self.nmsh = self.nmsh * self._nsw
         if ("mp_thick" in kwargs) and (self._mp_thick != kwargs["mp_thick"]):
             self._mp_thick = kwargs["mp_thick"]
-            self.parameters["Magnetopause thickness (km)"] = self._mp_thick
 
     def set_tilt(self, tilt):
         self._tilt = tilt
