@@ -75,12 +75,12 @@ class MPMap:
 
         def __repr__(self):
             return f"""IMF clock angle     : {self._clock}
-IMF cone angle     (°) : {self._cone}
-Dipole tilt angle  (°) : {self._tilt}
-IMF amplitude (nT)     : {self._bimf}
-Solar wind particle density : {self._nsw}
-Magnetopause thickness : {self._mp_thick}
-                     """
+                    IMF cone angle     (°) : {self._cone}
+                    Dipole tilt angle  (°) : {self._tilt}
+                    IMF amplitude (nT)     : {self._bimf}
+                    Solar wind particle density : {self._nsw}
+                    Magnetopause thickness : {self._mp_thick}
+                                         """
 
     def _build_map_grid(self):
         """
@@ -173,22 +173,26 @@ Magnetopause thickness : {self._mp_thick}
         return su.regular_grid_interpolation(new_ymp, new_zmp, nmsh, self.Y, self.Z)
 
     def set_parameters(self, **kwargs):
-        if "tilt" in kwargs:
+        if ("tilt" in kwargs) and (self._tilt != kwargs["tilt"]):
             self._tilt = kwargs["tilt"]
             self.bmsp = self._grid_bmsp[str(self._tilt)]
-        if ("clock" in kwargs) or ("cone" in kwargs):
-            if kwargs["clock"]:
+        if (("clock" in kwargs) and (self._clock != kwargs["clock"])) or (("cone" in kwargs) and (self._cone != kwargs["cone"])):
+            if "clock" in kwargs:
                 self._clock = kwargs["clock"]
             if "cone" in kwargs:
                 self._cone = kwargs["cone"]
             self.bmsh = self._processing_bmsh()
             self.nmsh = self._processing_nmsh()
-        if "bimf" in kwargs:
+        if ("bimf" in kwargs) and (self._bimf != kwargs["bimf"]):
+            self.bmsh = [b / self._bimf for b in self.bmsh]
             self._bimf = kwargs["bimf"]
-        if "nsw" in kwargs:
-            self._bimf = kwargs["nsw"]
-        if "mp_thick" in kwargs:
-            self._bimf = kwargs["mp_thick"]
+            self.bmsh = [b * self._bimf for b in self.bmsh] 
+        if ("nsw" in kwargs) and (self._nsw != kwargs["nsw"]):
+            self.nmsh = self.nmsh / self._nsw
+            self._nsw = kwargs["nsw"]
+            self.nmsh = self.nmsh * self._nsw
+        if ("mp_thick" in kwargs) and (self._mp_thick != kwargs["mp_thick"]):
+            self._mp_thick = kwargs["mp_thick"]
 
     def set_tilt(self, tilt):
         self._tilt = tilt
