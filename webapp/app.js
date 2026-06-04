@@ -1,26 +1,55 @@
-// mpmaps interactive webapp — Pyodide bootstrap, slider wiring, Plotly rendering.
+// mpmaps interactive webapp — main thread.
+// Pyodide lives in worker.js so heavy compute never freezes the UI.
 
 const SLICES_BASE = "./slices";  // override via window.MPMAPS_SLICES_BASE
-const WHEEL_URL   = "./mpmaps-0.2.0-py3-none-any.whl";
+const WHEEL_URL   = new URL("mpmaps-0.2.0-py3-none-any.whl", window.location.href).href;
 
+// ---------- status bar ----------
 const setStatus = (msg, kind = "busy") => {
   const el = document.getElementById("status");
   el.textContent = msg;
   el.className = `status status-${kind}`;
 };
 
-// ---------- slice fetching with in-memory cache ----------
+// ---------- slice fetch with cache ----------
 const sliceCache = new Map();
-
 async function fetchSlice(name) {
   if (sliceCache.has(name)) return sliceCache.get(name);
   const base = window.MPMAPS_SLICES_BASE || SLICES_BASE;
   const url = `${base}/${name}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`fetch ${url} failed: ${resp.status}`);
-  const buf = new Uint8Array(await resp.arrayBuffer());
+  const buf = await resp.arrayBuffer();
   sliceCache.set(name, buf);
   return buf;
+}
+
+// ---------- worker plumbing ----------
+const worker = new Worker("worker.js");
+
+let nextRequestId = 1;
+const pending = new Map();   // requestId → {resolve, reject}
+
+worker.onmessage = (e) => {
+  const m = e.data;
+  if (m.type === "status") {
+    setStatus(m.msg);
+    return;
+  }
+  const p = pending.get(m.requestId);
+  if (!p) return;
+  pending.delete(m.requestId);
+  if (m.type === "error") p.reject(new Error(m.msg));
+  else if (m.type === "ack") p.resolve(null);
+  else if (m.type === "result") p.resolve(m.data);
+};
+
+function call(message, transfer = []) {
+  const requestId = nextRequestId++;
+  return new Promise((resolve, reject) => {
+    pending.set(requestId, { resolve, reject });
+    worker.postMessage({ ...message, requestId }, transfer);
+  });
 }
 
 // ---------- IMF arrow ----------
@@ -31,12 +60,9 @@ function imfArrow3D(clockDeg, bimf) {
   const len = 5 + 0.3 * bimf;
   const base = [18, 0, 0];
   const tip  = [18, base[1] + len * sinC, base[2] + len * cosC];
-
   const shaft = {
     type: "scatter3d",
-    x: [base[0], tip[0]],
-    y: [base[1], tip[1]],
-    z: [base[2], tip[2]],
+    x: [base[0], tip[0]], y: [base[1], tip[1]], z: [base[2], tip[2]],
     mode: "lines",
     line: { color: "#ffd24a", width: 7 },
     showlegend: false, hoverinfo: "skip",
@@ -65,77 +91,79 @@ function imfArrowAnnotation2D(clockDeg, bimf) {
   };
 }
 
-// ---------- plot rendering ----------
+// ---------- color & label tables ----------
+const NIPY_SPECTRAL = [
+  [0.0000, "rgb(0,0,0)"],
+  [0.0667, "rgb(124,0,141)"],
+  [0.1333, "rgb(45,0,164)"],
+  [0.2000, "rgb(0,0,221)"],
+  [0.2667, "rgb(0,130,221)"],
+  [0.3333, "rgb(0,164,187)"],
+  [0.4000, "rgb(0,170,135)"],
+  [0.4667, "rgb(0,164,0)"],
+  [0.5333, "rgb(0,209,0)"],
+  [0.6000, "rgb(0,255,0)"],
+  [0.6667, "rgb(203,249,0)"],
+  [0.7333, "rgb(249,215,0)"],
+  [0.8000, "rgb(255,153,0)"],
+  [0.8667, "rgb(243,0,0)"],
+  [0.9333, "rgb(209,0,0)"],
+  [1.0000, "rgb(204,204,204)"],
+];
 const COLORSCALES = {
-  shear_angle:       "Jet",
-  reconnection_rate: "Viridis",
-  current_density:   "Viridis",
+  shear_angle:       NIPY_SPECTRAL,
+  reconnection_rate: "Jet",
+  current_density:   "Jet",
 };
-
 const TITLES = {
   shear_angle:       "Shear angle (°)",
-  reconnection_rate: "Rec. rate (m/s)",
+  reconnection_rate: "Rec. rate (mV/m)",
   current_density:   "Current density (nA/m²)",
 };
+const CLIMS = { shear_angle: [0, 180] };
 
-const CLIMS = {
-  shear_angle: [0, 180],
-};
-
+// ---------- plot rendering ----------
 function render3D(result, quantity, clockDeg, bimf) {
   const { X, Y, Z, scalars, wireframe } = result;
-
   const cmin = CLIMS[quantity]?.[0] ?? null;
   const cmax = CLIMS[quantity]?.[1] ?? null;
 
   const surface = {
     type: "surface",
-    x: X, y: Y, z: Z,
-    surfacecolor: scalars,
-    colorscale: COLORSCALES[quantity],
-    cmin, cmax,
+    x: X, y: Y, z: Z, surfacecolor: scalars,
+    colorscale: COLORSCALES[quantity], cmin, cmax,
     colorbar: { title: TITLES[quantity], thickness: 14, len: 0.75, x: 1.0 },
     showscale: true,
     lighting: { ambient: 0.6, diffuse: 0.7, specular: 0.2 },
     contours: { z: { show: false } },
   };
-
-  // wireframe: list of {x, y, z}
   const wireTraces = wireframe.map((seg) => ({
     type: "scatter3d",
-    x: seg.x, y: seg.y, z: seg.z,
-    mode: "lines",
+    x: seg.x, y: seg.y, z: seg.z, mode: "lines",
     line: { color: "rgba(200,200,200,0.4)", width: 1 },
     showlegend: false, hoverinfo: "skip",
   }));
-
   const [shaft, head] = imfArrow3D(clockDeg, bimf);
-
   const layout = {
-    paper_bgcolor: "#161b22",
-    plot_bgcolor: "#161b22",
+    paper_bgcolor: "#161b22", plot_bgcolor: "#161b22",
     font: { color: "#e6edf3" },
     margin: { l: 0, r: 0, t: 0, b: 0 },
     scene: {
-      bgcolor: "#0e1116",
-      aspectmode: "data",
+      bgcolor: "#0e1116", aspectmode: "data",
       xaxis: { title: "X (Rₑ)", color: "#9aa4ad", gridcolor: "#2a3038" },
       yaxis: { title: "Y (Rₑ)", color: "#9aa4ad", gridcolor: "#2a3038" },
       zaxis: { title: "Z (Rₑ)", color: "#9aa4ad", gridcolor: "#2a3038" },
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
-
   Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head], layout,
                { displaylogo: false, responsive: true });
 }
 
 function render2D(result, quantity, clockDeg, bimf) {
   const { y_axis, z_axis, heat_scalars, mp_boundary_y, mp_boundary_z } = result;
-
   const cmin = CLIMS[quantity]?.[0] ?? null;
   const cmax = CLIMS[quantity]?.[1] ?? null;
-
   const heatmap = {
     type: "heatmap",
     x: y_axis, y: z_axis, z: heat_scalars,
@@ -143,18 +171,14 @@ function render2D(result, quantity, clockDeg, bimf) {
     zmin: cmin, zmax: cmax,
     colorbar: { title: TITLES[quantity], thickness: 14, len: 0.85 },
   };
-
   const boundary = {
     type: "scatter",
-    x: mp_boundary_y, y: mp_boundary_z,
-    mode: "lines",
+    x: mp_boundary_y, y: mp_boundary_z, mode: "lines",
     line: { color: "rgba(230,237,243,0.7)", width: 2, dash: "dash" },
     showlegend: false, hoverinfo: "skip",
   };
-
   const layout = {
-    paper_bgcolor: "#161b22",
-    plot_bgcolor: "#0e1116",
+    paper_bgcolor: "#161b22", plot_bgcolor: "#0e1116",
     font: { color: "#e6edf3" },
     margin: { l: 50, r: 20, t: 10, b: 40 },
     xaxis: {
@@ -168,50 +192,42 @@ function render2D(result, quantity, clockDeg, bimf) {
     },
     annotations: [imfArrowAnnotation2D(clockDeg, bimf)],
   };
-
   Plotly.react("plot-2d", [heatmap, boundary], layout,
                { displaylogo: false, responsive: true });
 }
 
-// ---------- Pyodide setup ----------
-let pyodide = null;
-let pyApp   = null;
+// ---------- compute orchestration ----------
+let busy = false;
+let pendingParams = null;
+let loadedConeKey = null;
+let loadedTiltKey = null;
 
-async function setupPyodide() {
-  setStatus("loading Pyodide runtime…");
-  pyodide = await loadPyodide();
+// LRU cache of compute results, keyed by the full parameter tuple.
+// Most parameter combos cost ~3 MB (101×101 surface + 401×401 heatmap + wireframe).
+// 40 entries ≈ 120 MB of browser memory, well within budget.
+const COMPUTE_CACHE_SIZE = 40;
+const computeCache = new Map();   // insertion-ordered → use for LRU
 
-  setStatus("loading numpy / scipy / pandas / matplotlib…");
-  await pyodide.loadPackage(["numpy", "scipy", "pandas", "matplotlib", "micropip"]);
-
-  setStatus("installing spok and mpmaps…");
-  await pyodide.runPythonAsync(`
-    import micropip
-    await micropip.install("spok")
-    await micropip.install("${WHEEL_URL}")
-  `);
-
-  setStatus("loading webapp Python…");
-  const resp = await fetch("pyodide_app.py");
-  const code = await resp.text();
-  pyodide.FS.writeFile("/home/pyodide/pyodide_app.py", code);
-  await pyodide.runPythonAsync(`
-    import sys
-    sys.path.insert(0, "/home/pyodide")
-    import pyodide_app
-  `);
-  pyApp = pyodide.globals.get("pyodide_app");
-
-  // bootstrap coordinates slice (always needed)
-  setStatus("fetching magnetopause coordinates…");
-  const coords = await fetchSlice("coordinates.npz");
-  pyodide.globals.set("_coords_bytes", coords);
-  await pyodide.runPythonAsync(`pyodide_app.set_coordinates(_coords_bytes.to_py())`);
+function cacheKey(p) {
+  return `${p.quantity}|${p.clock}|${p.cone}|${p.tilt}|${p.bimf}|${p.nsw}`;
 }
 
-// ---------- param state + recompute ----------
-let busy = false;
-let pending = false;
+function cacheGet(key) {
+  if (!computeCache.has(key)) return null;
+  const val = computeCache.get(key);
+  // move to most-recent end
+  computeCache.delete(key);
+  computeCache.set(key, val);
+  return val;
+}
+
+function cachePut(key, val) {
+  if (computeCache.size >= COMPUTE_CACHE_SIZE) {
+    const oldest = computeCache.keys().next().value;
+    computeCache.delete(oldest);
+  }
+  computeCache.set(key, val);
+}
 
 function readParams() {
   return {
@@ -224,54 +240,56 @@ function readParams() {
   };
 }
 
-async function ensureSlicesFor(params) {
-  const coneKey = `${params.cone}`;
-  const tiltKey = `${params.tilt}`;
-  const fetches = [
+async function ensureSlicesFor(coneKey, tiltKey) {
+  if (coneKey === loadedConeKey && tiltKey === loadedTiltKey) return;
+  setStatus(`fetching slices for cone=${coneKey}°, tilt=${tiltKey}°…`);
+  const [bmsh, nmsh, bmsp, nmsp] = await Promise.all([
     fetchSlice(`bmsh_cone${coneKey}.npz`),
     fetchSlice(`nmsh_cone${coneKey}.npz`),
     fetchSlice(`bmsp_tilt${tiltKey}.npz`),
     fetchSlice(`nmsp_tilt${tiltKey}.npz`),
-  ];
-  const [bmsh, nmsh, bmsp, nmsp] = await Promise.all(fetches);
-  pyodide.globals.set("_bmsh_bytes", bmsh);
-  pyodide.globals.set("_nmsh_bytes", nmsh);
-  pyodide.globals.set("_bmsp_bytes", bmsp);
-  pyodide.globals.set("_nmsp_bytes", nmsp);
-  await pyodide.runPythonAsync(`
-    pyodide_app.set_slices(
-      "${coneKey}", "${tiltKey}",
-      _bmsh_bytes.to_py(), _nmsh_bytes.to_py(),
-      _bmsp_bytes.to_py(), _nmsp_bytes.to_py(),
-    )
-  `);
+  ]);
+  await call({
+    type: "set_slices",
+    cone_key: coneKey, tilt_key: tiltKey,
+    bmsh, nmsh, bmsp, nmsp,
+  });
+  loadedConeKey = coneKey;
+  loadedTiltKey = tiltKey;
 }
 
 async function recompute() {
-  if (busy) { pending = true; return; }
+  if (busy) { pendingParams = readParams(); return; }
   busy = true;
   try {
-    const p = readParams();
-    setStatus(`fetching slices for cone=${p.cone}°, tilt=${p.tilt}°…`);
-    await ensureSlicesFor(p);
+    let p = readParams();
+    do {
+      pendingParams = null;
+      const key = cacheKey(p);
+      let data = cacheGet(key);
+      let fromCache = data !== null;
 
-    setStatus(`computing ${p.quantity}…`);
-    pyodide.globals.set("_params", pyodide.toPy(p));
-    const resultProxy = await pyodide.runPythonAsync(
-      `pyodide_app.compute_and_render(_params)`
-    );
-    const result = resultProxy.toJs({ dict_converter: Object.fromEntries });
-    resultProxy.destroy();
+      if (!fromCache) {
+        await ensureSlicesFor(`${p.cone}`, `${p.tilt}`);
+        setStatus(`computing ${p.quantity}…`);
+        data = await call({ type: "compute", params: p });
+        cachePut(key, data);
+      }
 
-    render3D(result, p.quantity, p.clock, p.bimf);
-    render2D(result, p.quantity, p.clock, p.bimf);
-    setStatus(`${p.quantity} · clock=${p.clock}° cone=${p.cone}° tilt=${p.tilt}°`, "ready");
+      render3D(data, p.quantity, p.clock, p.bimf);
+      render2D(data, p.quantity, p.clock, p.bimf);
+      const tag = fromCache ? " · cached" : "";
+      setStatus(
+        `${p.quantity} · clock=${p.clock}° cone=${p.cone}° tilt=${p.tilt}°${tag}`,
+        "ready"
+      );
+      p = pendingParams;
+    } while (p);
   } catch (err) {
     console.error(err);
     setStatus(`error: ${err.message || err}`, "error");
   } finally {
     busy = false;
-    if (pending) { pending = false; recompute(); }
   }
 }
 
@@ -292,11 +310,15 @@ function wireSliders() {
     r.addEventListener("change", recompute));
 }
 
-// ---------- main ----------
+// ---------- bootstrap ----------
 (async () => {
   try {
     wireSliders();
-    await setupPyodide();
+    setStatus("initializing worker…");
+    await call({ type: "init", wheelUrl: WHEEL_URL });
+    setStatus("fetching magnetopause coordinates…");
+    const coords = await fetchSlice("coordinates.npz");
+    await call({ type: "set_coordinates", bytes: coords });
     await recompute();
   } catch (err) {
     console.error(err);

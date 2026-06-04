@@ -158,17 +158,26 @@ def compute_and_render(params):
     if quantity == "shear_angle":
         scalars = mp.shear_angle()
     elif quantity == "reconnection_rate":
-        scalars = mp.reconnection_rate()
+        scalars = mp.reconnection_rate() * 1e3  # m/s → mV/m (E = v × B normalization)
     elif quantity == "current_density":
         scalars = mp.current_density()[0]
     else:
         raise ValueError(f"unknown quantity: {quantity}")
 
+    # Dayside-only mask: drop everything where the MP surface is outside the
+    # dayside or where the interpolated X is missing.
+    X_DAYSIDE_MIN = 1.0
+    dayside = np.isfinite(mp.X) & (mp.X >= X_DAYSIDE_MIN)
+    scalars = np.where(dayside, scalars, np.nan)
+    Xm = np.where(dayside, mp.X, np.nan)
+    Ym = np.where(dayside, mp.Y, np.nan)
+    Zm = np.where(dayside, mp.Z, np.nan)
+
     # Down-sample the 3D surface to make the round-trip + Plotly render snappy.
     step3d = 4
-    X = _downsample(mp.X, step3d).astype(np.float32)
-    Y = _downsample(mp.Y, step3d).astype(np.float32)
-    Z = _downsample(mp.Z, step3d).astype(np.float32)
+    X = _downsample(Xm, step3d).astype(np.float32)
+    Y = _downsample(Ym, step3d).astype(np.float32)
+    Z = _downsample(Zm, step3d).astype(np.float32)
     S3 = _downsample(scalars, step3d).astype(np.float32)
 
     # 2D heatmap uses uniform Y, Z axes from the cartesian grid.

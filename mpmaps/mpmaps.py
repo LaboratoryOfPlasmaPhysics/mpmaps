@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from scipy import constants as cst
 from scipy.optimize import root
-from platformdirs import user_data_dir
 from .globals import grids
 import os
 import matplotlib.pyplot as plt
@@ -64,6 +63,7 @@ class MPMap:
         self.nmsh = self._processing_nmsh()
 
     def _load_grids(self):
+        from platformdirs import user_data_dir
         self._grid_path = os.path.join(user_data_dir(), "mpmaps")
         self._Xmp, self._Ymp, self._Zmp, self._theta, self._phi = pd.read_pickle(
             os.path.join(self._grid_path, grids[0])
