@@ -34,6 +34,10 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = ["pandas", "numpy", "matplotlib", "scipy", "spok"]
+
+[project.optional-dependencies]
+viz3d = ["pyvista>=0.43"]
+
 [project.urls]
 homepage = "https://github.com/LaboratoryOfPlasmaPhysics/mpmaps"
 

@@ -306,6 +306,39 @@ Magnetopause thickness : {self._mp_thick}
 
         return fig, ax
 
+    def plot3d(self, **kwargs):
+        """
+        Render a 3D PyVista scene of a quantity on the dayside magnetopause.
+
+        Requires pyvista: pip install pyvista
+
+        Keyword arguments
+        -----------------
+        quantity : str
+            'shear_angle' (default), 'reconnection_rate', or 'current_density'
+        camera : str or list
+            'oblique' (default), 'trattner', or explicit [[pos],[focal],[up]]
+        dark_mode : bool (default True)
+        interactive : bool (default False)
+            Open an interactive window; prints final camera position on close.
+        filename : str or None
+            Path to save a PNG screenshot.
+        x_plane : float (default 0.0)
+            X position of the upstream projection plane in Re.
+        y_plane : float (default -50.0)
+            Y offset of the projection plane from the 3D surface in Re.
+        x_min : float (default 1.0)
+            Minimum X cutoff for the magnetopause surface in Re.
+        vmax : float or None
+            Color scale upper bound; auto-computed from data if None.
+
+        Returns
+        -------
+        pv.Plotter
+        """
+        from .viz3d import render_scene
+        return render_scene(self, **kwargs)
+
     def _find_rec_angle_max_rate(self):
         def _dRR_dtheta_local(theta, params):
             n1 = params[:, 0] * 1e6 * cst.m_p
