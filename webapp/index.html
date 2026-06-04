@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mpmaps · interactive magnetopause maps</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.0/full/pyodide.js"></script>
+</head>
+<body>
+  <header>
+    <h1>mpmaps · interactive magnetopause maps</h1>
+    <p class="subtitle">
+      In-situ–derived shear angle, reconnection rate, and current density at Earth's magnetopause.
+      Move the sliders; the maps recompute live in your browser via Pyodide.
+    </p>
+  </header>
+
+  <section class="controls">
+    <fieldset>
+      <legend>Quantity</legend>
+      <label><input type="radio" name="quantity" value="shear_angle" checked> Shear angle (°)</label>
+      <label><input type="radio" name="quantity" value="reconnection_rate"> Reconnection rate (m/s)</label>
+      <label><input type="radio" name="quantity" value="current_density"> Current density (nA/m²)</label>
+    </fieldset>
+
+    <fieldset class="sliders">
+      <legend>Solar wind / IMF parameters</legend>
+
+      <div class="slider-row">
+        <label for="clock">IMF clock angle (°)</label>
+        <input type="range" id="clock" min="0" max="359" step="1" value="180">
+        <output for="clock" id="clock-value">180</output>
+      </div>
+
+      <div class="slider-row">
+        <label for="cone">IMF cone angle (°)</label>
+        <input type="range" id="cone" min="1" max="90" step="1" value="55">
+        <output for="cone" id="cone-value">55</output>
+      </div>
+
+      <div class="slider-row">
+        <label for="tilt">Dipole tilt (°)</label>
+        <input type="range" id="tilt" min="-30" max="30" step="1" value="0">
+        <output for="tilt" id="tilt-value">0</output>
+      </div>
+
+      <div class="slider-row">
+        <label for="bimf">IMF amplitude (nT)</label>
+        <input type="range" id="bimf" min="1" max="20" step="0.5" value="5">
+        <output for="bimf" id="bimf-value">5</output>
+      </div>
+
+      <div class="slider-row">
+        <label for="nsw">SW density (cm⁻³)</label>
+        <input type="range" id="nsw" min="1" max="30" step="0.5" value="5">
+        <output for="nsw" id="nsw-value">5</output>
+      </div>
+    </fieldset>
+  </section>
+
+  <section class="plots">
+    <div class="plot-container">
+      <h3>3D view</h3>
+      <div id="plot-3d"></div>
+    </div>
+    <div class="plot-container">
+      <h3>Projected map (Y–Z plane)</h3>
+      <div id="plot-2d"></div>
+    </div>
+  </section>
+
+  <footer>
+    <div id="status" class="status status-loading">initializing Pyodide…</div>
+    <div class="links">
+      <a href="https://github.com/LaboratoryOfPlasmaPhysics/mpmaps">github</a>
+      ·
+      mpmaps v0.2.0 · physics by Michotte de Welle et&nbsp;al. (2024)
+    </div>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

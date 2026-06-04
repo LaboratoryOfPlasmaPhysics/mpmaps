@@ -104,3 +104,8 @@ ENV/
 # IDE settings
 .vscode/
 .idea/
+
+# Webapp generated assets
+webapp/slices/        # run scripts/convert_grids.py to produce
+webapp/*.whl          # built by CI (flit) before pages deploy
+webapp/__pycache__/

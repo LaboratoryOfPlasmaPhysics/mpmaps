@@ -1,0 +1,62 @@
+name: Deploy webapp to GitHub Pages
+
+on:
+  push:
+    branches: [master, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install flit
+
+      - name: Build mpmaps wheel
+        run: |
+          python -m flit build --format wheel
+          cp dist/mpmaps-*-py3-none-any.whl webapp/
+
+      # NOTE: webapp/slices/ is NOT generated here — those huge grid files live
+      # on hephaistos.lpp.polytechnique.fr. The deployed webapp fetches them by
+      # setting `window.MPMAPS_SLICES_BASE` to that public URL.
+      - name: Inject slices base URL
+        run: |
+          cat > webapp/config.js <<'EOF'
+          window.MPMAPS_SLICES_BASE = "https://hephaistos.lpp.polytechnique.fr/data/mpmaps_slices";
+          EOF
+          # Inject the config <script> tag right before app.js
+          sed -i 's|<script type="module" src="app.js"></script>|<script src="config.js"></script>\n  <script type="module" src="app.js"></script>|' webapp/index.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: webapp/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

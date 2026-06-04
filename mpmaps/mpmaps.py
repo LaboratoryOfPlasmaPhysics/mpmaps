@@ -15,7 +15,7 @@ from spok import utils as su
 
 
 class MPMap:
-    def __init__(self, **kwargs):
+    def __init__(self, data=None, **kwargs):
         """
         Keyword arguments:
         ------------------
@@ -38,8 +38,13 @@ class MPMap:
         mp_thick: float, (default 800)
                 Magnetopause thickness in km
                 only used for computing the current density
+
+        data: dict, optional
+                Pre-loaded grid arrays. When provided, disk loading is skipped.
+                Expected keys: 'coordinates' (dict with Xmp, Ymp, Zmp, theta, phi),
+                'bmsp', 'bmsh', 'nmsp', 'nmsh' (each a dict mapping angle-string to array).
+                Used by the Pyodide webapp to inject fetched npz slices.
         """
-        self._grid_path = os.path.join(user_data_dir(), "mpmaps")
         self._clock = kwargs.get("clock", -90)
         self._cone = kwargs.get("cone", 55)
         self._tilt = kwargs.get("tilt", 0)
@@ -47,40 +52,47 @@ class MPMap:
         self._nsw = kwargs.get("nsw", 5)
         self._mp_thick = kwargs.get("mp_thick", 800)
 
-        self._Xmp, self._Ymp, self._Zmp, self._theta, self._phi = pd.read_pickle(
-            os.path.join(self._grid_path, grids[0])
-        ).values()  # 'mp_coordinates.pkl'
+        if data is None:
+            self._load_grids()
+        else:
+            self._set_grids_from_data(data)
 
         self._build_map_grid()
-
-        self._grid_bmsp = pd.read_pickle(
-            os.path.join(self._grid_path, grids[1])
-        )  #'mp_b_msp.pkl'
         self.bmsp = self._grid_bmsp[str(self._tilt)]
-
-        self._grid_bmsh = pd.read_pickle(
-            os.path.join(self._grid_path, grids[2])
-        )  # 'mp_b_msh.pkl'
         self.bmsh = self._processing_bmsh()
-
-        self._grid_nmsp = pd.read_pickle(
-            os.path.join(self._grid_path, grids[3])
-        )  # 'mp_np_msp.pkl'
         self.nmsp = self._grid_nmsp[str(self._tilt)]
-
-        self._grid_nmsh = pd.read_pickle(
-            os.path.join(self._grid_path, grids[4])
-        )  # 'mp_np_msh.pkl'
         self.nmsh = self._processing_nmsh()
 
-        def __repr__(self):
-            return f"""IMF clock angle     : {self._clock}
+    def _load_grids(self):
+        self._grid_path = os.path.join(user_data_dir(), "mpmaps")
+        self._Xmp, self._Ymp, self._Zmp, self._theta, self._phi = pd.read_pickle(
+            os.path.join(self._grid_path, grids[0])
+        ).values()
+        self._grid_bmsp = pd.read_pickle(os.path.join(self._grid_path, grids[1]))
+        self._grid_bmsh = pd.read_pickle(os.path.join(self._grid_path, grids[2]))
+        self._grid_nmsp = pd.read_pickle(os.path.join(self._grid_path, grids[3]))
+        self._grid_nmsh = pd.read_pickle(os.path.join(self._grid_path, grids[4]))
+
+    def _set_grids_from_data(self, data):
+        c = data["coordinates"]
+        self._Xmp = c["Xmp"]
+        self._Ymp = c["Ymp"]
+        self._Zmp = c["Zmp"]
+        self._theta = c["theta"]
+        self._phi = c["phi"]
+        self._grid_bmsp = data["bmsp"]
+        self._grid_bmsh = data["bmsh"]
+        self._grid_nmsp = data["nmsp"]
+        self._grid_nmsh = data["nmsh"]
+
+    def __repr__(self):
+        return f"""IMF clock angle    (°) : {self._clock}
 IMF cone angle     (°) : {self._cone}
 Dipole tilt angle  (°) : {self._tilt}
 IMF amplitude (nT)     : {self._bimf}
 Solar wind particle density : {self._nsw}
 Magnetopause thickness : {self._mp_thick}
-                     """
+"""
 
     def _build_map_grid(self):
         """
