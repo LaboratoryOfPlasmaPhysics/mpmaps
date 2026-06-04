@@ -40,7 +40,7 @@ jobs:
       - name: Inject slices base URL
         run: |
           cat > webapp/config.js <<'EOF'
-          window.MPMAPS_SLICES_BASE = "https://hephaistos.lpp.polytechnique.fr/data/mpmaps_slices";
+          window.MPMAPS_SLICES_BASE = "https://hephaistos.lpp.polytechnique.fr/data/mpmaps_grids/slices";
           EOF
           # Inject the config <script> tag right before app.js
           sed -i 's|<script type="module" src="app.js"></script>|<script src="config.js"></script>\n  <script type="module" src="app.js"></script>|' webapp/index.html
