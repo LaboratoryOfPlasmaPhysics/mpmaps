@@ -10,8 +10,9 @@ from .globals import grids
 
 
 _IN_PYODIDE = "pyodide" in sys.modules
+_SKIP_DOWNLOAD = bool(os.environ.get("MPMAPS_SKIP_DOWNLOAD"))
 
-if not _IN_PYODIDE:
+if not _IN_PYODIDE and not _SKIP_DOWNLOAD:
     import urllib.request
     from platformdirs import user_data_dir
 
