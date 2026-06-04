@@ -135,7 +135,12 @@ function render3D(result, quantity, clockDeg, bimf) {
     colorbar: { title: TITLES[quantity], thickness: 14, len: 0.75, x: 1.0 },
     showscale: true,
     lighting: { ambient: 0.6, diffuse: 0.7, specular: 0.2 },
-    contours: { z: { show: false } },
+    contours: {
+      x: { show: false, highlight: false },
+      y: { show: false, highlight: false },
+      z: { show: false, highlight: false },
+    },
+    hoverinfo: "skip",
   };
   const wireTraces = wireframe.map((seg) => ({
     type: "scatter3d",
@@ -293,6 +298,81 @@ async function recompute() {
   }
 }
 
+// ---------- export ----------
+const EXPORT_WIDTH = 1400;
+const EXPORT_HEIGHT = 1000;
+
+function exportFilenameStem() {
+  const q = document.querySelector('input[name="quantity"]:checked').value;
+  const p = readParams();
+  return `mpmaps_${q}_clock${p.clock}_cone${p.cone}_tilt${p.tilt}_b${p.bimf}_n${p.nsw}`;
+}
+
+let jsPDFPromise = null;
+function loadJsPDF() {
+  if (!jsPDFPromise) {
+    jsPDFPromise = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js";
+      s.onload = () => resolve(window.jspdf.jsPDF);
+      s.onerror = () => reject(new Error("failed to load jsPDF"));
+      document.head.appendChild(s);
+    });
+  }
+  return jsPDFPromise;
+}
+
+async function exportPlots(format) {
+  const stem = exportFilenameStem();
+  if (format === "png") {
+    await Plotly.downloadImage("plot-3d", {
+      format: "png", filename: `${stem}_3d`,
+      width: EXPORT_WIDTH, height: EXPORT_HEIGHT,
+    });
+    await Plotly.downloadImage("plot-2d", {
+      format: "png", filename: `${stem}_2d`,
+      width: EXPORT_WIDTH, height: EXPORT_HEIGHT,
+    });
+    return;
+  }
+  if (format === "pdf") {
+    const JsPDF = await loadJsPDF();
+    const [img3d, img2d] = await Promise.all([
+      Plotly.toImage("plot-3d", { format: "png", width: EXPORT_WIDTH, height: EXPORT_HEIGHT }),
+      Plotly.toImage("plot-2d", { format: "png", width: EXPORT_WIDTH, height: EXPORT_HEIGHT }),
+    ]);
+    // Landscape A4: 297 × 210 mm. Two plots side-by-side with 10 mm margins.
+    const pdf = new JsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const margin = 10, gap = 6;
+    const pageW = 297, pageH = 210;
+    const imgW = (pageW - 2 * margin - gap) / 2;
+    const imgH = imgW * (EXPORT_HEIGHT / EXPORT_WIDTH);
+    const y = (pageH - imgH) / 2;
+    pdf.addImage(img3d, "PNG", margin, y, imgW, imgH);
+    pdf.addImage(img2d, "PNG", margin + imgW + gap, y, imgW, imgH);
+    pdf.save(`${stem}.pdf`);
+  }
+}
+
+function wireExport() {
+  const btn = document.getElementById("export-btn");
+  const sel = document.getElementById("export-format");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = "exporting…";
+    try {
+      await exportPlots(sel.value);
+    } catch (err) {
+      console.error(err);
+      setStatus(`export failed: ${err.message || err}`, "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
+    }
+  });
+}
+
 // ---------- slider wiring ----------
 function wireSliders() {
   const ids = ["clock", "cone", "tilt", "bimf", "nsw"];
@@ -314,6 +394,7 @@ function wireSliders() {
 (async () => {
   try {
     wireSliders();
+    wireExport();
     setStatus("initializing worker…");
     await call({ type: "init", wheelUrl: WHEEL_URL });
     setStatus("fetching magnetopause coordinates…");

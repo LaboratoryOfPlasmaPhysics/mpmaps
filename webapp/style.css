@@ -102,6 +102,42 @@ fieldset label {
   font-size: 13px;
 }
 
+.export {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.export label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.export select,
+.export button {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.export button {
+  background: var(--accent-soft);
+  color: #0e1116;
+  border-color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.export button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 .plots {
   display: grid;
   grid-template-columns: 1fr 1fr;

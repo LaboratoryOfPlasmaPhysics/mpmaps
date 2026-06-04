@@ -3,16 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>mpmaps · interactive magnetopause maps</title>
+  <title>MP-Maps - interactive Magnetopause Maps</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 </head>
 <body>
   <header>
-    <h1>mpmaps · interactive magnetopause maps</h1>
+    <h1>MP-Maps - interactive Magnetopause Maps</h1>
     <p class="subtitle">
       In-situ–derived shear angle, reconnection rate, and current density at Earth's magnetopause.
-      Move the sliders; the maps recompute live in your browser via Pyodide.
     </p>
   </header>
 
@@ -56,6 +55,16 @@
         <input type="range" id="nsw" min="1" max="30" step="0.5" value="5">
         <output for="nsw" id="nsw-value">5</output>
       </div>
+    </fieldset>
+
+    <fieldset class="export">
+      <legend>Export</legend>
+      <label for="export-format">Format</label>
+      <select id="export-format">
+        <option value="png">PNG</option>
+        <option value="pdf">PDF</option>
+      </select>
+      <button type="button" id="export-btn">Download plots</button>
     </fieldset>
   </section>
 
