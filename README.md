@@ -42,7 +42,7 @@ shear_map_values = mpm.shear_angle()
 
 # now let's make a map for northward IMF
 # other IMF params are default ones
-mpm_north = mpm.MPMap(clock=45)
+mpm_north = mpmaps.MPMap(clock=45)
 shear = mpm_north.shear_angle()
 
 ```
@@ -61,7 +61,7 @@ mpm.set_parameters(tilt=12, clock=127, cone = 22, bimf=5)
 # parameters set above
 # by default the reconnection components are computed
 # so that the X line maximizes the Cassak-Shay scaliing law
-# (rec_angle='rate')
+# (rec_angle='max_rate')
 rate_values = mpm.reconnection_rate()
 
 #now same map but with X line locally aligned with the bisection

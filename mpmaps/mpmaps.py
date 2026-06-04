@@ -188,8 +188,9 @@ Magnetopause thickness : {self._mp_thick}
         if "tilt" in kwargs:
             self._tilt = kwargs["tilt"]
             self.bmsp = self._grid_bmsp[str(self._tilt)]
+            self.nmsp = self._grid_nmsp[str(self._tilt)]
         if ("clock" in kwargs) or ("cone" in kwargs):
-            if kwargs["clock"]:
+            if "clock" in kwargs:
                 self._clock = kwargs["clock"]
             if "cone" in kwargs:
                 self._cone = kwargs["cone"]
@@ -198,9 +199,9 @@ Magnetopause thickness : {self._mp_thick}
         if "bimf" in kwargs:
             self._bimf = kwargs["bimf"]
         if "nsw" in kwargs:
-            self._bimf = kwargs["nsw"]
+            self._nsw = kwargs["nsw"]
         if "mp_thick" in kwargs:
-            self._bimf = kwargs["mp_thick"]
+            self._mp_thick = kwargs["mp_thick"]
 
     def set_tilt(self, tilt):
         self._tilt = tilt
