@@ -77,15 +77,22 @@ pyodide_app.set_slices(
       ack(msg.requestId);
 
     } else if (msg.type === "compute") {
+      const tPy0 = performance.now();
       pyodide.globals.set("_params", pyodide.toPy(msg.params));
       const proxy = await pyodide.runPythonAsync(
         `pyodide_app.compute_and_render(_params)`
       );
+      const tPy1 = performance.now();
       const data = proxy.toJs({
         dict_converter: Object.fromEntries,
         depth: -1,
       });
+      const tPy2 = performance.now();
       proxy.destroy();
+      if (data && data._timings) {
+        data._timings.worker_python_call = tPy1 - tPy0;
+        data._timings.worker_proxy_to_js = tPy2 - tPy1;
+      }
       result(msg.requestId, data);
 
     } else {

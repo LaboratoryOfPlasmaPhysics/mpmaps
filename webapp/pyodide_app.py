@@ -12,6 +12,8 @@ for Plotly to render in JS.
 """
 
 import io
+import time
+
 import numpy as np
 
 
@@ -152,9 +154,14 @@ def compute_and_render(params):
       - mp_boundary_y, mp_boundary_z : terminator boundary for 2D overlay
     """
     p = dict(params)
+    timings = {}
+
+    t0 = time.perf_counter()
     mp = _build_mp(p)
+    timings["py_build_mp"] = (time.perf_counter() - t0) * 1000
 
     quantity = p["quantity"]
+    t0 = time.perf_counter()
     if quantity == "shear_angle":
         scalars = mp.shear_angle()
     elif quantity == "reconnection_rate":
@@ -163,41 +170,56 @@ def compute_and_render(params):
         scalars = mp.current_density()[0]
     else:
         raise ValueError(f"unknown quantity: {quantity}")
+    timings["py_compute_quantity"] = (time.perf_counter() - t0) * 1000
 
     # Dayside-only mask: drop everything where the MP surface is outside the
     # dayside or where the interpolated X is missing.
+    t0 = time.perf_counter()
     X_DAYSIDE_MIN = 1.0
     dayside = np.isfinite(mp.X) & (mp.X >= X_DAYSIDE_MIN)
     scalars = np.where(dayside, scalars, np.nan)
     Xm = np.where(dayside, mp.X, np.nan)
     Ym = np.where(dayside, mp.Y, np.nan)
     Zm = np.where(dayside, mp.Z, np.nan)
+    timings["py_mask"] = (time.perf_counter() - t0) * 1000
 
     # Down-sample the 3D surface to make the round-trip + Plotly render snappy.
+    t0 = time.perf_counter()
     step3d = 4
     X = _downsample(Xm, step3d).astype(np.float32)
     Y = _downsample(Ym, step3d).astype(np.float32)
     Z = _downsample(Zm, step3d).astype(np.float32)
     S3 = _downsample(scalars, step3d).astype(np.float32)
+    S3_list = [[None if not np.isfinite(v) else float(v) for v in row] for row in S3]
+    timings["py_serialize_3d"] = (time.perf_counter() - t0) * 1000
 
     # 2D heatmap uses uniform Y, Z axes from the cartesian grid.
+    t0 = time.perf_counter()
     y_axis = mp.Y[0, :].astype(np.float32).tolist()
     z_axis = mp.Z[:, 0].astype(np.float32).tolist()
     S2 = scalars.astype(np.float32)
     # NaNs render as transparent in Plotly; replace them with None for json safety.
     S2_list = [[None if not np.isfinite(v) else float(v) for v in row] for row in S2]
+    timings["py_serialize_2d"] = (time.perf_counter() - t0) * 1000
 
+    t0 = time.perf_counter()
+    wireframe = _shue_wireframe()
+    timings["py_wireframe"] = (time.perf_counter() - t0) * 1000
+
+    t0 = time.perf_counter()
     mp_y, mp_z = _mp_terminator()
+    timings["py_terminator"] = (time.perf_counter() - t0) * 1000
 
     return {
         "X": X.tolist(),
         "Y": Y.tolist(),
         "Z": Z.tolist(),
-        "scalars": [[None if not np.isfinite(v) else float(v) for v in row] for row in S3],
+        "scalars": S3_list,
         "y_axis": y_axis,
         "z_axis": z_axis,
         "heat_scalars": S2_list,
-        "wireframe": _shue_wireframe(),
+        "wireframe": wireframe,
         "mp_boundary_y": mp_y,
         "mp_boundary_z": mp_z,
+        "_timings": timings,
     }

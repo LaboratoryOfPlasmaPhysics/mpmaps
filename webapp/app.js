@@ -4,6 +4,10 @@
 const SLICES_BASE = "./slices";  // override via window.MPMAPS_SLICES_BASE
 const WHEEL_URL   = new URL("mpmaps-0.2.0-py3-none-any.whl", window.location.href).href;
 
+// ---------- profiling (enable with ?profile=1) ----------
+const PROFILE = new URLSearchParams(window.location.search).has("profile");
+const tick = () => performance.now();
+
 // ---------- status bar ----------
 const setStatus = (msg, kind = "busy") => {
   const el = document.getElementById("status");
@@ -245,20 +249,24 @@ function readParams() {
   };
 }
 
-async function ensureSlicesFor(coneKey, tiltKey) {
+async function ensureSlicesFor(coneKey, tiltKey, prof = null) {
   if (coneKey === loadedConeKey && tiltKey === loadedTiltKey) return;
   setStatus(`fetching slices for cone=${coneKey}°, tilt=${tiltKey}°…`);
+  let t0 = tick();
   const [bmsh, nmsh, bmsp, nmsp] = await Promise.all([
     fetchSlice(`bmsh_cone${coneKey}.npz`),
     fetchSlice(`nmsh_cone${coneKey}.npz`),
     fetchSlice(`bmsp_tilt${tiltKey}.npz`),
     fetchSlice(`nmsp_tilt${tiltKey}.npz`),
   ]);
+  if (prof) prof.fetch_slices = tick() - t0;
+  t0 = tick();
   await call({
     type: "set_slices",
     cone_key: coneKey, tilt_key: tiltKey,
     bmsh, nmsh, bmsp, nmsp,
   });
+  if (prof) prof.worker_set_slices = tick() - t0;
   loadedConeKey = coneKey;
   loadedTiltKey = tiltKey;
 }
@@ -274,15 +282,44 @@ async function recompute() {
       let data = cacheGet(key);
       let fromCache = data !== null;
 
+      const prof = PROFILE ? {} : null;
+      const tTotal0 = tick();
+
       if (!fromCache) {
-        await ensureSlicesFor(`${p.cone}`, `${p.tilt}`);
+        await ensureSlicesFor(`${p.cone}`, `${p.tilt}`, prof);
         setStatus(`computing ${p.quantity}…`);
+        let t0 = tick();
         data = await call({ type: "compute", params: p });
+        if (prof) prof.worker_compute_roundtrip = tick() - t0;
         cachePut(key, data);
       }
 
+      let t0 = tick();
       render3D(data, p.quantity, p.clock, p.bimf);
+      if (prof) prof.render_3d = tick() - t0;
+      t0 = tick();
       render2D(data, p.quantity, p.clock, p.bimf);
+      if (prof) prof.render_2d = tick() - t0;
+
+      if (prof) {
+        prof.total = tick() - tTotal0;
+        const py = data && data._timings ? data._timings : {};
+        const rows = { ...py, ...prof, from_cache: fromCache };
+        const tabular = Object.fromEntries(
+          Object.entries(rows).map(([k, v]) => [
+            k,
+            typeof v === "number" ? +v.toFixed(1) : v,
+          ])
+        );
+        console.groupCollapsed(
+          `[profile] ${p.quantity} clock=${p.clock} cone=${p.cone} ` +
+          `tilt=${p.tilt} → ${prof.total.toFixed(0)} ms` +
+          (fromCache ? " (cached)" : "")
+        );
+        console.table(tabular);
+        console.groupEnd();
+      }
+
       const tag = fromCache ? " · cached" : "";
       setStatus(
         `${p.quantity} · clock=${p.clock}° cone=${p.cone}° tilt=${p.tilt}°${tag}`,
