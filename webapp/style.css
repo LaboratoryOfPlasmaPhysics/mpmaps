@@ -21,8 +21,33 @@ html, body {
 }
 
 header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
   padding: 18px 24px 6px;
   border-bottom: 1px solid var(--border);
+}
+
+.header-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.cdpp-link {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+}
+
+.cdpp-link:hover { opacity: 1; }
+
+.cdpp-logo {
+  height: 40px;
+  width: auto;
+  display: block;
 }
 
 header h1 {
