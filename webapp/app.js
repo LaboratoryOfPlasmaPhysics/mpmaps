@@ -68,13 +68,21 @@ function call(message, transfer = []) {
 }
 
 // ---------- IMF arrow ----------
-function imfArrow3D(clockDeg, bimf) {
+function imfArrow3D(clockDeg, coneDeg, bimf) {
+  // IMF unit vector (pointing toward Earth from upstream):
+  //   cone = 0  → purely radial, along -X
+  //   cone = 90 → purely transverse, clock controls Y-Z orientation
   const r = Math.PI / 180;
-  const sinC = Math.sin(clockDeg * r);
-  const cosC = Math.cos(clockDeg * r);
+  const sCl = Math.sin(clockDeg * r);
+  const cCl = Math.cos(clockDeg * r);
+  const sCo = Math.sin(coneDeg * r);
+  const cCo = Math.cos(coneDeg * r);
+  const dx = -cCo;
+  const dy = sCo * sCl;
+  const dz = sCo * cCl;
   const len = 5 + 0.3 * bimf;
   const base = [18, 0, 0];
-  const tip  = [18, base[1] + len * sinC, base[2] + len * cosC];
+  const tip  = [base[0] + len * dx, base[1] + len * dy, base[2] + len * dz];
   const shaft = {
     type: "scatter3d",
     x: [base[0], tip[0]], y: [base[1], tip[1]], z: [base[2], tip[2]],
@@ -85,7 +93,7 @@ function imfArrow3D(clockDeg, bimf) {
   const head = {
     type: "cone",
     x: [tip[0]], y: [tip[1]], z: [tip[2]],
-    u: [0], v: [sinC], w: [cosC],
+    u: [dx], v: [dy], w: [dz],
     anchor: "tip", sizemode: "absolute", sizeref: 1.6,
     colorscale: [[0, "#ffd24a"], [1, "#ffd24a"]],
     showscale: false, hoverinfo: "skip",
@@ -162,7 +170,7 @@ const THEMES = {
 };
 
 // ---------- plot rendering ----------
-function render3D(result, quantity, clockDeg, bimf, themeName = "dark", title = null) {
+function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark", title = null) {
   const t = THEMES[themeName];
   const { X, Y, Z, scalars, wireframe } = result;
   const cmin = CLIMS[quantity]?.[0] ?? null;
@@ -188,7 +196,7 @@ function render3D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     line: { color: t.wire, width: 1 },
     showlegend: false, hoverinfo: "skip",
   }));
-  const [shaft, head] = imfArrow3D(clockDeg, bimf);
+  const [shaft, head] = imfArrow3D(clockDeg, coneDeg, bimf);
   const layout = {
     paper_bgcolor: t.paper, plot_bgcolor: t.paper,
     font: { color: t.font },
@@ -335,12 +343,12 @@ async function recompute() {
       }
 
       let t0 = tick();
-      render3D(data, p.quantity, p.clock, p.bimf);
+      render3D(data, p.quantity, p.clock, p.cone, p.bimf);
       if (prof) prof.render_3d = tick() - t0;
       t0 = tick();
       render2D(data, p.quantity, p.clock, p.bimf);
       if (prof) prof.render_2d = tick() - t0;
-      lastRender = { data, quantity: p.quantity, clock: p.clock, bimf: p.bimf };
+      lastRender = { data, quantity: p.quantity, clock: p.clock, cone: p.cone, bimf: p.bimf };
 
       if (prof) {
         prof.total = tick() - tTotal0;
@@ -434,17 +442,17 @@ async function withLightTheme(fn) {
   if (!lastRender) {
     throw new Error("nothing to export yet — wait for the first compute");
   }
-  const { data, quantity, clock, bimf } = lastRender;
+  const { data, quantity, clock, cone, bimf } = lastRender;
   const title = exportTitle();
   // Re-render both plots with the publication palette + title, wait a
   // frame for Plotly to commit, run the snapshot work, then restore.
-  render3D(data, quantity, clock, bimf, "light", title);
+  render3D(data, quantity, clock, cone, bimf, "light", title);
   render2D(data, quantity, clock, bimf, "light", title);
   await new Promise((r) => requestAnimationFrame(r));
   try {
     return await fn();
   } finally {
-    render3D(data, quantity, clock, bimf, "dark");
+    render3D(data, quantity, clock, cone, bimf, "dark");
     render2D(data, quantity, clock, bimf, "dark");
   }
 }
