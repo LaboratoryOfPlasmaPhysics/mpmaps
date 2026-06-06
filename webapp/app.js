@@ -361,23 +361,40 @@ function loadJsPDF() {
   return jsPDFPromise;
 }
 
+async function snapshotPlot(id) {
+  // Plotly draws different layers into separate canvases (WebGL for the 3D
+  // scene, a dedicated <canvas> for heatmaps and colorbars, SVG for axes
+  // and scatter traces). toImage() can read those canvases before they're
+  // repainted, leaving the SVG layer alone in the output. Force a resize
+  // (which redraws everything synchronously) and wait one animation frame
+  // for the browser to actually paint before snapshotting.
+  await Plotly.Plots.resize(id);
+  await new Promise((r) => requestAnimationFrame(r));
+  return Plotly.toImage(id, { format: "png", scale: EXPORT_SCALE });
+}
+
+function downloadDataUrl(dataUrl, filename) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 async function exportPlots(format) {
   const stem = exportFilenameStem();
   if (format === "png") {
-    await Plotly.downloadImage("plot-3d", {
-      format: "png", filename: `${stem}_3d`, scale: EXPORT_SCALE,
-    });
-    await Plotly.downloadImage("plot-2d", {
-      format: "png", filename: `${stem}_2d`, scale: EXPORT_SCALE,
-    });
+    const img3d = await snapshotPlot("plot-3d");
+    downloadDataUrl(img3d, `${stem}_3d.png`);
+    const img2d = await snapshotPlot("plot-2d");
+    downloadDataUrl(img2d, `${stem}_2d.png`);
     return;
   }
   if (format === "pdf") {
     const JsPDF = await loadJsPDF();
-    const [img3d, img2d] = await Promise.all([
-      Plotly.toImage("plot-3d", { format: "png", scale: EXPORT_SCALE }),
-      Plotly.toImage("plot-2d", { format: "png", scale: EXPORT_SCALE }),
-    ]);
+    const img3d = await snapshotPlot("plot-3d");
+    const img2d = await snapshotPlot("plot-2d");
     // Use the actual rendered aspect ratios so the embedded images
     // aren't squashed when the two plots have different shapes.
     const plot3d = document.getElementById("plot-3d");
