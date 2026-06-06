@@ -8,11 +8,22 @@ const WHEEL_URL   = new URL("mpmaps-0.2.0-py3-none-any.whl", window.location.hre
 const PROFILE = new URLSearchParams(window.location.search).has("profile");
 const tick = () => performance.now();
 
-// ---------- status bar ----------
+// ---------- status bar + overlay ----------
 const setStatus = (msg, kind = "busy") => {
   const el = document.getElementById("status");
   el.textContent = msg;
   el.className = `status status-${kind}`;
+
+  const overlay = document.getElementById("plots-overlay");
+  const overlayMsg = document.getElementById("overlay-msg");
+  if (overlay && overlayMsg) {
+    if (kind === "ready") {
+      overlay.hidden = true;
+    } else {
+      overlayMsg.textContent = msg;
+      overlay.hidden = false;
+    }
+  }
 };
 
 // ---------- slice fetch with cache ----------

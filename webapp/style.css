@@ -139,10 +139,60 @@ fieldset label {
 }
 
 .plots {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   padding: 12px 24px;
+}
+
+.plots-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(14, 17, 22, 0.78);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  animation: overlay-fade-in 120ms ease-out;
+}
+.plots-overlay[hidden] { display: none; }
+
+.plots-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 22px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.plots-overlay-msg {
+  font-size: 14px;
+  color: var(--text);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #2a3038;
+  border-top-color: var(--accent-soft);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .plot-container {
