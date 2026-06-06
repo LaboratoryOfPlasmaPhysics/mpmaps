@@ -162,7 +162,7 @@ const THEMES = {
 };
 
 // ---------- plot rendering ----------
-function render3D(result, quantity, clockDeg, bimf, themeName = "dark") {
+function render3D(result, quantity, clockDeg, bimf, themeName = "dark", title = null) {
   const t = THEMES[themeName];
   const { X, Y, Z, scalars, wireframe } = result;
   const cmin = CLIMS[quantity]?.[0] ?? null;
@@ -192,7 +192,8 @@ function render3D(result, quantity, clockDeg, bimf, themeName = "dark") {
   const layout = {
     paper_bgcolor: t.paper, plot_bgcolor: t.paper,
     font: { color: t.font },
-    margin: { l: 0, r: 0, t: 0, b: 0 },
+    margin: { l: 0, r: 0, t: title ? 40 : 0, b: 0 },
+    title: title ? { text: title, x: 0.5, xanchor: "center", font: { size: 14 } } : undefined,
     scene: {
       bgcolor: t.plot, aspectmode: "data",
       xaxis: { title: "X (Rₑ)", color: t.axis, gridcolor: t.grid },
@@ -205,7 +206,7 @@ function render3D(result, quantity, clockDeg, bimf, themeName = "dark") {
                { displaylogo: false, responsive: true });
 }
 
-function render2D(result, quantity, clockDeg, bimf, themeName = "dark") {
+function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = null) {
   const t = THEMES[themeName];
   const { y_axis, z_axis, heat_scalars, mp_boundary_y, mp_boundary_z } = result;
   const cmin = CLIMS[quantity]?.[0] ?? null;
@@ -226,7 +227,8 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark") {
   const layout = {
     paper_bgcolor: t.paper, plot_bgcolor: t.plot,
     font: { color: t.font },
-    margin: { l: 50, r: 20, t: 10, b: 40 },
+    margin: { l: 50, r: 20, t: title ? 40 : 10, b: 40 },
+    title: title ? { text: title, x: 0.5, xanchor: "center", font: { size: 14 } } : undefined,
     xaxis: {
       title: "Y (Rₑ)", color: t.axis, gridcolor: t.grid,
       zeroline: true, zerolinecolor: t.zero,
@@ -421,15 +423,23 @@ function downloadDataUrl(dataUrl, filename) {
   a.remove();
 }
 
+function exportTitle() {
+  const q = TITLES[document.querySelector('input[name="quantity"]:checked').value];
+  const p = readParams();
+  return `${q} — clock=${p.clock}° cone=${p.cone}° tilt=${p.tilt}°` +
+         `, B_IMF=${p.bimf} nT, n_SW=${p.nsw} cm⁻³`;
+}
+
 async function withLightTheme(fn) {
   if (!lastRender) {
     throw new Error("nothing to export yet — wait for the first compute");
   }
   const { data, quantity, clock, bimf } = lastRender;
-  // Re-render both plots with the publication palette, wait a frame for
-  // Plotly to commit the redraw, run the snapshot work, then restore.
-  render3D(data, quantity, clock, bimf, "light");
-  render2D(data, quantity, clock, bimf, "light");
+  const title = exportTitle();
+  // Re-render both plots with the publication palette + title, wait a
+  // frame for Plotly to commit, run the snapshot work, then restore.
+  render3D(data, quantity, clock, bimf, "light", title);
+  render2D(data, quantity, clock, bimf, "light", title);
   await new Promise((r) => requestAnimationFrame(r));
   try {
     return await fn();
