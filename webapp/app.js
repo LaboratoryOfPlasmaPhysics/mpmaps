@@ -197,8 +197,12 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
     showlegend: false, hoverinfo: "skip",
   }));
   const [shaft, head] = imfArrow3D(clockDeg, coneDeg, bimf);
+  // For light-theme exports, keep the outer paper transparent so the
+  // snapshotPlot composite can layer the WebGL canvas pixels underneath
+  // the html-to-image overlay. The WebGL scene background uses t.plot,
+  // which still paints white inside the canvas where there's no surface.
   const layout = {
-    paper_bgcolor: t.paper, plot_bgcolor: t.paper,
+    paper_bgcolor: t.paper, plot_bgcolor: t.plot,
     font: { color: t.font },
     margin: { l: 0, r: 0, t: title ? 40 : 0, b: 0 },
     title: title ? { text: title, x: 0.5, xanchor: "center", font: { size: 14 } } : undefined,
@@ -400,30 +404,147 @@ function exportFilenameStem() {
   return `mpmaps_${q}_clock${p.clock}_cone${p.cone}_tilt${p.tilt}_b${p.bimf}_n${p.nsw}`;
 }
 
+function loadScript(src, globalKey) {
+  return new Promise((resolve, reject) => {
+    if (window[globalKey]) return resolve(window[globalKey]);
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => {
+      if (window[globalKey]) resolve(window[globalKey]);
+      else reject(new Error(`${src} loaded but ${globalKey} missing`));
+    };
+    s.onerror = () => reject(new Error(`failed to load ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
 let jsPDFPromise = null;
 function loadJsPDF() {
   if (!jsPDFPromise) {
-    jsPDFPromise = new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js";
-      s.onload = () => resolve(window.jspdf.jsPDF);
-      s.onerror = () => reject(new Error("failed to load jsPDF"));
-      document.head.appendChild(s);
-    });
+    jsPDFPromise = loadScript(
+      "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
+      "jspdf"
+    ).then((m) => m.jsPDF);
   }
   return jsPDFPromise;
 }
 
+let htmlToImagePromise = null;
+function loadHtmlToImage() {
+  if (!htmlToImagePromise) {
+    htmlToImagePromise = loadScript(
+      "https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.js",
+      "htmlToImage"
+    );
+  }
+  return htmlToImagePromise;
+}
+
+function isWebGLCanvas(c) {
+  // Probe for a WebGL context directly. Asking for "webgl" / "webgl2" on a
+  // canvas that already has either returns that context; on a canvas that
+  // has a 2D context (or none) it returns null. Wrapped in try/catch
+  // because some browsers throw rather than return null.
+  try {
+    return !!(c.getContext("webgl") || c.getContext("webgl2") ||
+              c.getContext("experimental-webgl"));
+  } catch {
+    return false;
+  }
+}
+
+async function loadDataUrl(dataUrl) {
+  const img = new Image();
+  await new Promise((res, rej) => {
+    img.onload = res;
+    img.onerror = () => rej(new Error("image failed to load from data URL"));
+    img.src = dataUrl;
+  });
+  return img;
+}
+
+// Real Safari / WebKit silently drops WebGL canvases from html-to-image's
+// foreignObject clone. Chromium and friends do include the WebGL content.
+// Detect at runtime so we only run the heavier composite path where needed.
+const IS_WEBKIT = typeof navigator !== "undefined" &&
+  /WebKit/.test(navigator.userAgent) &&
+  !/Chrome|Chromium|Edg/.test(navigator.userAgent);
+
 async function snapshotPlot(id) {
-  // Plotly draws different layers into separate canvases (WebGL for the 3D
-  // scene, a dedicated <canvas> for heatmaps and colorbars, SVG for axes
-  // and scatter traces). toImage() can read those canvases before they're
-  // repainted, leaving the SVG layer alone in the output. Force a resize
-  // (which redraws everything synchronously) and wait one animation frame
-  // for the browser to actually paint before snapshotting.
+  // Force a synchronous redraw + wait two animation frames so the WebGL
+  // surface, heatmap canvas, colorbar canvas, and SVG axes are all
+  // freshly painted on the live page before we read pixels.
   await Plotly.Plots.resize(id);
   await new Promise((r) => requestAnimationFrame(r));
-  return Plotly.toImage(id, { format: "png", scale: EXPORT_SCALE });
+  await new Promise((r) => requestAnimationFrame(r));
+
+  // Non-Safari: Plotly's own snapshot machinery works (this is what
+  // Chromium has shipped reliably). Return early.
+  if (!IS_WEBKIT) {
+    return Plotly.toImage(id, { format: "png", scale: EXPORT_SCALE });
+  }
+
+  // Real Safari (18.x) drops the WebGL canvas from Plotly's off-screen
+  // snapshot pipeline AND from html-to-image's DOM clone — both come
+  // back with only the SVG layer. canvas.toDataURL on the *live* WebGL
+  // canvas DOES work in WebKit, though, so we composite manually:
+  //   1. Read each WebGL canvas's pixels + screen position.
+  //   2. Capture the rest via html-to-image (gets SVG + 2D canvases).
+  //   3. Clear the WebGL region out of that overlay, then draw WebGL
+  //      pixels underneath and the cleared overlay on top.
+  const plot = document.getElementById(id);
+  const plotRect = plot.getBoundingClientRect();
+  const wglLayers = [];
+  for (const c of plot.querySelectorAll("canvas")) {
+    if (!isWebGLCanvas(c)) continue;
+    const cr = c.getBoundingClientRect();
+    wglLayers.push({
+      x: cr.left - plotRect.left,
+      y: cr.top - plotRect.top,
+      w: cr.width,
+      h: cr.height,
+      dataUrl: c.toDataURL("image/png"),
+    });
+  }
+
+  const htmlToImage = await loadHtmlToImage();
+  const overlayUrl = await htmlToImage.toPng(plot, {
+    pixelRatio: EXPORT_SCALE,
+    cacheBust: true,
+  });
+  if (wglLayers.length === 0) return overlayUrl;
+
+  const W = Math.round(plotRect.width * EXPORT_SCALE);
+  const H = Math.round(plotRect.height * EXPORT_SCALE);
+  const overlay = await loadDataUrl(overlayUrl);
+  const overlayCanvas = document.createElement("canvas");
+  overlayCanvas.width = W;
+  overlayCanvas.height = H;
+  const oc = overlayCanvas.getContext("2d");
+  oc.drawImage(overlay, 0, 0, W, H);
+  for (const l of wglLayers) {
+    oc.clearRect(
+      l.x * EXPORT_SCALE, l.y * EXPORT_SCALE,
+      l.w * EXPORT_SCALE, l.h * EXPORT_SCALE
+    );
+  }
+
+  const out = document.createElement("canvas");
+  out.width = W;
+  out.height = H;
+  const ctx = out.getContext("2d");
+  ctx.fillStyle = THEMES.light.paper;
+  ctx.fillRect(0, 0, W, H);
+  for (const l of wglLayers) {
+    const img = await loadDataUrl(l.dataUrl);
+    ctx.drawImage(
+      img,
+      l.x * EXPORT_SCALE, l.y * EXPORT_SCALE,
+      l.w * EXPORT_SCALE, l.h * EXPORT_SCALE
+    );
+  }
+  ctx.drawImage(overlayCanvas, 0, 0);
+  return out.toDataURL("image/png");
 }
 
 function downloadDataUrl(dataUrl, filename) {
