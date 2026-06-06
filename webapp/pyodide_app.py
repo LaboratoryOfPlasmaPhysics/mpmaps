@@ -26,7 +26,7 @@ _state = {
     "bmsp": None,          # tuple (bx, by, bz)
     "nmsp": None,          # array
     "mp": None,            # cached MPMap instance
-    "mp_key": None,        # (cone, tilt, clock, bimf, nsw) — invalidates mp
+    "mp_last": None,       # dict of bimf/nsw/clock last applied to mp
 }
 
 
@@ -60,6 +60,7 @@ def set_slices(cone_key, tilt_key, bmsh_bytes, nmsh_bytes, bmsp_bytes, nmsp_byte
         _state["nmsh"] = nmsh["n"].astype(np.float64)
         _state["cone_key"] = cone_key
         _state["mp"] = None
+        _state["mp_last"] = None
     if tilt_key != _state["tilt_key"]:
         bmsp = _load_npz(bmsp_bytes)
         _state["bmsp"] = (
@@ -71,6 +72,7 @@ def set_slices(cone_key, tilt_key, bmsh_bytes, nmsh_bytes, bmsp_bytes, nmsp_byte
         _state["nmsp"] = nmsp["n"].astype(np.float64)
         _state["tilt_key"] = tilt_key
         _state["mp"] = None
+        _state["mp_last"] = None
 
 
 def _key_to_value(key):
@@ -157,7 +159,37 @@ def compute_and_render(params):
     timings = {}
 
     t0 = time.perf_counter()
-    mp = _build_mp(p)
+    mp = _state.get("mp")
+    last = _state.get("mp_last") or {}
+
+    if mp is None:
+        # Cold path: first call, or slices just changed (cone/tilt).
+        mp = _build_mp(p)
+    else:
+        # Warm path: only clock/bimf/nsw can have changed (cone/tilt
+        # changes invalidate `mp` via set_slices). Apply just the delta.
+        if last.get("bimf") != p["bimf"]:
+            old = last.get("bimf") or mp._bimf
+            ratio = p["bimf"] / old if old else 1.0
+            mp.bmsh = tuple(b * ratio for b in mp.bmsh)
+            mp._bimf = p["bimf"]
+        if last.get("nsw") != p["nsw"]:
+            old = last.get("nsw") or mp._nsw
+            ratio = p["nsw"] / old if old else 1.0
+            mp.nmsh = mp.nmsh * ratio
+            mp._nsw = p["nsw"]
+        if last.get("clock") != p["clock"]:
+            # set_parameters(clock=...) re-runs _processing_bmsh/nmsh,
+            # which re-applies the current self._bimf / self._nsw, so the
+            # rescaling above stays consistent.
+            mp.set_parameters(clock=p["clock"])
+
+    _state["mp"] = mp
+    _state["mp_last"] = {
+        "clock": p["clock"],
+        "bimf": p["bimf"],
+        "nsw": p["nsw"],
+    }
     timings["py_build_mp"] = (time.perf_counter() - t0) * 1000
 
     quantity = p["quantity"]
