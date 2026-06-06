@@ -137,8 +137,33 @@ const TITLES = {
 };
 const CLIMS = { shear_angle: [0, 180] };
 
+// ---------- color themes ----------
+const THEMES = {
+  dark: {
+    paper:    "#161b22",
+    plot:     "#0e1116",
+    font:     "#e6edf3",
+    axis:     "#9aa4ad",
+    grid:     "#2a3038",
+    zero:     "#3a4048",
+    wire:     "rgba(200,200,200,0.4)",
+    boundary: "rgba(230,237,243,0.7)",
+  },
+  light: {
+    paper:    "#ffffff",
+    plot:     "#ffffff",
+    font:     "#1a1a1a",
+    axis:     "#1a1a1a",
+    grid:     "#c8ccd0",
+    zero:     "#7a7f86",
+    wire:     "rgba(60,60,60,0.55)",
+    boundary: "rgba(20,20,20,0.75)",
+  },
+};
+
 // ---------- plot rendering ----------
-function render3D(result, quantity, clockDeg, bimf) {
+function render3D(result, quantity, clockDeg, bimf, themeName = "dark") {
+  const t = THEMES[themeName];
   const { X, Y, Z, scalars, wireframe } = result;
   const cmin = CLIMS[quantity]?.[0] ?? null;
   const cmax = CLIMS[quantity]?.[1] ?? null;
@@ -160,19 +185,19 @@ function render3D(result, quantity, clockDeg, bimf) {
   const wireTraces = wireframe.map((seg) => ({
     type: "scatter3d",
     x: seg.x, y: seg.y, z: seg.z, mode: "lines",
-    line: { color: "rgba(200,200,200,0.4)", width: 1 },
+    line: { color: t.wire, width: 1 },
     showlegend: false, hoverinfo: "skip",
   }));
   const [shaft, head] = imfArrow3D(clockDeg, bimf);
   const layout = {
-    paper_bgcolor: "#161b22", plot_bgcolor: "#161b22",
-    font: { color: "#e6edf3" },
+    paper_bgcolor: t.paper, plot_bgcolor: t.paper,
+    font: { color: t.font },
     margin: { l: 0, r: 0, t: 0, b: 0 },
     scene: {
-      bgcolor: "#0e1116", aspectmode: "data",
-      xaxis: { title: "X (Rₑ)", color: "#9aa4ad", gridcolor: "#2a3038" },
-      yaxis: { title: "Y (Rₑ)", color: "#9aa4ad", gridcolor: "#2a3038" },
-      zaxis: { title: "Z (Rₑ)", color: "#9aa4ad", gridcolor: "#2a3038" },
+      bgcolor: t.plot, aspectmode: "data",
+      xaxis: { title: "X (Rₑ)", color: t.axis, gridcolor: t.grid },
+      yaxis: { title: "Y (Rₑ)", color: t.axis, gridcolor: t.grid },
+      zaxis: { title: "Z (Rₑ)", color: t.axis, gridcolor: t.grid },
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
@@ -180,7 +205,8 @@ function render3D(result, quantity, clockDeg, bimf) {
                { displaylogo: false, responsive: true });
 }
 
-function render2D(result, quantity, clockDeg, bimf) {
+function render2D(result, quantity, clockDeg, bimf, themeName = "dark") {
+  const t = THEMES[themeName];
   const { y_axis, z_axis, heat_scalars, mp_boundary_y, mp_boundary_z } = result;
   const cmin = CLIMS[quantity]?.[0] ?? null;
   const cmax = CLIMS[quantity]?.[1] ?? null;
@@ -194,21 +220,21 @@ function render2D(result, quantity, clockDeg, bimf) {
   const boundary = {
     type: "scatter",
     x: mp_boundary_y, y: mp_boundary_z, mode: "lines",
-    line: { color: "rgba(230,237,243,0.7)", width: 2, dash: "dash" },
+    line: { color: t.boundary, width: 2, dash: "dash" },
     showlegend: false, hoverinfo: "skip",
   };
   const layout = {
-    paper_bgcolor: "#161b22", plot_bgcolor: "#0e1116",
-    font: { color: "#e6edf3" },
+    paper_bgcolor: t.paper, plot_bgcolor: t.plot,
+    font: { color: t.font },
     margin: { l: 50, r: 20, t: 10, b: 40 },
     xaxis: {
-      title: "Y (Rₑ)", color: "#9aa4ad", gridcolor: "#2a3038",
-      zeroline: true, zerolinecolor: "#3a4048",
+      title: "Y (Rₑ)", color: t.axis, gridcolor: t.grid,
+      zeroline: true, zerolinecolor: t.zero,
       scaleanchor: "y", scaleratio: 1,
     },
     yaxis: {
-      title: "Z (Rₑ)", color: "#9aa4ad", gridcolor: "#2a3038",
-      zeroline: true, zerolinecolor: "#3a4048",
+      title: "Z (Rₑ)", color: t.axis, gridcolor: t.grid,
+      zeroline: true, zerolinecolor: t.zero,
     },
     annotations: [imfArrowAnnotation2D(clockDeg, bimf)],
   };
@@ -219,6 +245,7 @@ function render2D(result, quantity, clockDeg, bimf) {
 // ---------- compute orchestration ----------
 let busy = false;
 let pendingParams = null;
+let lastRender = null;   // { data, quantity, clock, bimf } — for export theme swap
 let loadedConeKey = null;
 let loadedTiltKey = null;
 
@@ -311,6 +338,7 @@ async function recompute() {
       t0 = tick();
       render2D(data, p.quantity, p.clock, p.bimf);
       if (prof) prof.render_2d = tick() - t0;
+      lastRender = { data, quantity: p.quantity, clock: p.clock, bimf: p.bimf };
 
       if (prof) {
         prof.total = tick() - tTotal0;
@@ -393,19 +421,42 @@ function downloadDataUrl(dataUrl, filename) {
   a.remove();
 }
 
+async function withLightTheme(fn) {
+  if (!lastRender) {
+    throw new Error("nothing to export yet — wait for the first compute");
+  }
+  const { data, quantity, clock, bimf } = lastRender;
+  // Re-render both plots with the publication palette, wait a frame for
+  // Plotly to commit the redraw, run the snapshot work, then restore.
+  render3D(data, quantity, clock, bimf, "light");
+  render2D(data, quantity, clock, bimf, "light");
+  await new Promise((r) => requestAnimationFrame(r));
+  try {
+    return await fn();
+  } finally {
+    render3D(data, quantity, clock, bimf, "dark");
+    render2D(data, quantity, clock, bimf, "dark");
+  }
+}
+
 async function exportPlots(format) {
   const stem = exportFilenameStem();
   if (format === "png") {
-    const img3d = await snapshotPlot("plot-3d");
-    downloadDataUrl(img3d, `${stem}_3d.png`);
-    const img2d = await snapshotPlot("plot-2d");
-    downloadDataUrl(img2d, `${stem}_2d.png`);
+    await withLightTheme(async () => {
+      const img3d = await snapshotPlot("plot-3d");
+      downloadDataUrl(img3d, `${stem}_3d.png`);
+      const img2d = await snapshotPlot("plot-2d");
+      downloadDataUrl(img2d, `${stem}_2d.png`);
+    });
     return;
   }
   if (format === "pdf") {
     const JsPDF = await loadJsPDF();
-    const img3d = await snapshotPlot("plot-3d");
-    const img2d = await snapshotPlot("plot-2d");
+    let img3d, img2d;
+    await withLightTheme(async () => {
+      img3d = await snapshotPlot("plot-3d");
+      img2d = await snapshotPlot("plot-2d");
+    });
     // Use the actual rendered aspect ratios so the embedded images
     // aren't squashed when the two plots have different shapes.
     const plot3d = document.getElementById("plot-3d");
