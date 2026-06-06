@@ -225,6 +225,10 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     colorscale: COLORSCALES[quantity],
     zmin: cmin, zmax: cmax,
     colorbar: { title: TITLES[quantity], thickness: 14, len: 0.85 },
+    hovertemplate:
+      `Y: %{x:.1f} R<sub>e</sub><br>` +
+      `Z: %{y:.1f} R<sub>e</sub><br>` +
+      `${TITLES[quantity]}: %{z:.2f}<extra></extra>`,
   };
   const boundary = {
     type: "scatter",
