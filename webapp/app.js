@@ -336,8 +336,10 @@ async function recompute() {
 }
 
 // ---------- export ----------
-const EXPORT_WIDTH = 1400;
-const EXPORT_HEIGHT = 1000;
+// Pixel density multiplier. Avoid passing absolute width/height to
+// Plotly's snapshot APIs — for 3D scenes that triggers an off-screen
+// WebGL resize that often skips the surface and leaves only the colorbar.
+const EXPORT_SCALE = 2;
 
 function exportFilenameStem() {
   const q = document.querySelector('input[name="quantity"]:checked').value;
@@ -363,30 +365,36 @@ async function exportPlots(format) {
   const stem = exportFilenameStem();
   if (format === "png") {
     await Plotly.downloadImage("plot-3d", {
-      format: "png", filename: `${stem}_3d`,
-      width: EXPORT_WIDTH, height: EXPORT_HEIGHT,
+      format: "png", filename: `${stem}_3d`, scale: EXPORT_SCALE,
     });
     await Plotly.downloadImage("plot-2d", {
-      format: "png", filename: `${stem}_2d`,
-      width: EXPORT_WIDTH, height: EXPORT_HEIGHT,
+      format: "png", filename: `${stem}_2d`, scale: EXPORT_SCALE,
     });
     return;
   }
   if (format === "pdf") {
     const JsPDF = await loadJsPDF();
     const [img3d, img2d] = await Promise.all([
-      Plotly.toImage("plot-3d", { format: "png", width: EXPORT_WIDTH, height: EXPORT_HEIGHT }),
-      Plotly.toImage("plot-2d", { format: "png", width: EXPORT_WIDTH, height: EXPORT_HEIGHT }),
+      Plotly.toImage("plot-3d", { format: "png", scale: EXPORT_SCALE }),
+      Plotly.toImage("plot-2d", { format: "png", scale: EXPORT_SCALE }),
     ]);
+    // Use the actual rendered aspect ratios so the embedded images
+    // aren't squashed when the two plots have different shapes.
+    const plot3d = document.getElementById("plot-3d");
+    const plot2d = document.getElementById("plot-2d");
+    const ar3d = plot3d.clientHeight / plot3d.clientWidth;
+    const ar2d = plot2d.clientHeight / plot2d.clientWidth;
     // Landscape A4: 297 × 210 mm. Two plots side-by-side with 10 mm margins.
     const pdf = new JsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const margin = 10, gap = 6;
     const pageW = 297, pageH = 210;
     const imgW = (pageW - 2 * margin - gap) / 2;
-    const imgH = imgW * (EXPORT_HEIGHT / EXPORT_WIDTH);
-    const y = (pageH - imgH) / 2;
-    pdf.addImage(img3d, "PNG", margin, y, imgW, imgH);
-    pdf.addImage(img2d, "PNG", margin + imgW + gap, y, imgW, imgH);
+    const h3 = imgW * ar3d;
+    const h2 = imgW * ar2d;
+    const y3 = (pageH - h3) / 2;
+    const y2 = (pageH - h2) / 2;
+    pdf.addImage(img3d, "PNG", margin, y3, imgW, h3);
+    pdf.addImage(img2d, "PNG", margin + imgW + gap, y2, imgW, h2);
     pdf.save(`${stem}.pdf`);
   }
 }
