@@ -197,7 +197,10 @@ def compute_and_render(params):
     if quantity == "shear_angle":
         scalars = mp.shear_angle()
     elif quantity == "reconnection_rate":
-        scalars = mp.reconnection_rate() * 1e3  # m/s → mV/m (E = v × B normalization)
+        # mp.reconnection_rate() already returns mV/m: the 1e3 factor in
+        # k = 2 * 0.1 * 1e3 / sqrt(mu_0) (mpmaps.py) bakes the V/m → mV/m
+        # conversion into the output. No further scaling needed.
+        scalars = mp.reconnection_rate()
     elif quantity == "current_density":
         scalars = mp.current_density()[0]
     else:
