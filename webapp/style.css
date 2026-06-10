@@ -269,7 +269,121 @@ footer {
 }
 .links a:hover { text-decoration: underline; }
 
+/* ── Magnetopause boundary panel ─────────────────────────── */
+#mp-boundary-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.mode-row {
+  display: flex;
+  gap: 14px;
+}
+
+.number-row {
+  display: grid;
+  grid-template-columns: 90px 80px;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.number-row label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.number-row input[type="number"] {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+}
+
+#mp-manual-inputs.hidden { display: none; }
+
+/* ── Spacecraft crossings panel ──────────────────────────── */
+#sc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 260px;
+}
+
+#sc-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+  cursor: pointer;
+}
+
+.date-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-row label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.date-row input[type="datetime-local"] {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  width: 100%;
+  color-scheme: dark;
+}
+
+.sc-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#sc-load {
+  background: var(--accent-soft);
+  color: #0e1116;
+  border: 1px solid var(--accent-soft);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#sc-load:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#sc-status {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
 @media (max-width: 920px) {
   .plots { grid-template-columns: 1fr; }
   .sliders { grid-template-columns: 1fr; }
+  .date-row { grid-template-columns: auto 1fr; }
 }

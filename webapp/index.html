@@ -62,6 +62,56 @@
       </div>
     </fieldset>
 
+    <fieldset id="mp-boundary-panel">
+      <legend>Magnetopause boundary</legend>
+      <div class="mode-row">
+        <label><input type="radio" name="mp-mode" value="manual" checked> Manual</label>
+        <label><input type="radio" name="mp-mode" value="omni"> OMNI</label>
+      </div>
+      <div id="mp-manual-inputs">
+        <div class="number-row">
+          <label for="pd-input">Pd (nPa)</label>
+          <input type="number" id="pd-input" value="2.1" min="0.1" max="20" step="0.1">
+        </div>
+        <div class="number-row">
+          <label for="bz-input">Bz GSM (nT)</label>
+          <input type="number" id="bz-input" value="-2" min="-30" max="30" step="0.5">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset id="sc-panel">
+      <legend>Spacecraft crossings</legend>
+      <select id="sc-select">
+        <option value="">— none —</option>
+        <option value="mms1">MMS-1</option>
+        <option value="mms2">MMS-2</option>
+        <option value="mms3">MMS-3</option>
+        <option value="mms4">MMS-4</option>
+        <option value="cluster1">Cluster-1</option>
+        <option value="cluster2">Cluster-2</option>
+        <option value="cluster3">Cluster-3</option>
+        <option value="cluster4">Cluster-4</option>
+        <option value="themisa">THEMIS-A</option>
+        <option value="themisb">THEMIS-B</option>
+        <option value="themisc">THEMIS-C</option>
+        <option value="themisd">THEMIS-D</option>
+        <option value="themise">THEMIS-E</option>
+        <option value="geotail">Geotail</option>
+        <option value="doublestar1">Double Star TC-1</option>
+      </select>
+      <div class="date-row">
+        <label for="sc-start">From</label>
+        <input type="datetime-local" id="sc-start" value="2019-06-22T00:00">
+        <label for="sc-end">To</label>
+        <input type="datetime-local" id="sc-end" value="2019-06-23T00:00">
+      </div>
+      <div class="sc-actions">
+        <button type="button" id="sc-load" disabled>Load crossings</button>
+        <span id="sc-status"></span>
+      </div>
+    </fieldset>
+
     <fieldset class="export">
       <legend>Export</legend>
       <label for="export-format">Format</label>

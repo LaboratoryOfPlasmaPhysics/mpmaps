@@ -172,7 +172,7 @@ const THEMES = {
 // ---------- plot rendering ----------
 function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark", title = null) {
   const t = THEMES[themeName];
-  const { X, Y, Z, scalars, wireframe } = result;
+  const { X, Y, Z, scalars, wireframe, crossings } = result;
   const cmin = CLIMS[quantity]?.[0] ?? null;
   const cmax = CLIMS[quantity]?.[1] ?? null;
 
@@ -197,6 +197,26 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
     showlegend: false, hoverinfo: "skip",
   }));
   const [shaft, head] = imfArrow3D(clockDeg, coneDeg, bimf);
+
+  const cx = crossings && crossings.X && crossings.X.length > 0 ? {
+    type: "scatter3d",
+    x: crossings.X, y: crossings.Y, z: crossings.Z,
+    mode: "markers",
+    marker: {
+      size: 7, symbol: "diamond",
+      color: crossings.values,
+      colorscale: COLORSCALES[quantity], cmin, cmax,
+      line: { color: "white", width: 1 },
+      showscale: false,
+    },
+    text: crossings.times_iso.map((t, i) => {
+      const v = crossings.values[i];
+      return `${crossings.sc_id}<br>${t}<br>${TITLES[quantity]}: ${v != null ? v.toFixed(2) : "N/A"}`;
+    }),
+    hovertemplate: "%{text}<extra></extra>",
+    showlegend: false,
+  } : { type: "scatter3d", x: [], y: [], z: [], mode: "markers", showlegend: false, hoverinfo: "skip" };
+
   // For light-theme exports, keep the outer paper transparent so the
   // snapshotPlot composite can layer the WebGL canvas pixels underneath
   // the html-to-image overlay. The WebGL scene background uses t.plot,
@@ -214,13 +234,13 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
-  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head], layout,
+  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, cx], layout,
                { displaylogo: false, responsive: true });
 }
 
 function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = null) {
   const t = THEMES[themeName];
-  const { y_axis, z_axis, heat_scalars, mp_boundary_y, mp_boundary_z } = result;
+  const { y_axis, z_axis, heat_scalars, mp_boundary_y, mp_boundary_z, crossings } = result;
   const cmin = CLIMS[quantity]?.[0] ?? null;
   const cmax = CLIMS[quantity]?.[1] ?? null;
   const heatmap = {
@@ -240,6 +260,26 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     line: { color: t.boundary, width: 2, dash: "dash" },
     showlegend: false, hoverinfo: "skip",
   };
+
+  const cx = crossings && crossings.Y && crossings.Y.length > 0 ? {
+    type: "scatter",
+    x: crossings.Y, y: crossings.Z,
+    mode: "markers",
+    marker: {
+      size: 10, symbol: "diamond",
+      color: crossings.values,
+      colorscale: COLORSCALES[quantity], cmin, cmax,
+      line: { color: "white", width: 1.5 },
+      showscale: false,
+    },
+    text: crossings.times_iso.map((ts, i) => {
+      const v = crossings.values[i];
+      return `${crossings.sc_id}<br>${ts}<br>${TITLES[quantity]}: ${v != null ? v.toFixed(2) : "N/A"}`;
+    }),
+    hovertemplate: "%{text}<extra></extra>",
+    showlegend: false,
+  } : { type: "scatter", x: [], y: [], mode: "markers", showlegend: false, hoverinfo: "skip" };
+
   const layout = {
     paper_bgcolor: t.paper, plot_bgcolor: t.plot,
     font: { color: t.font },
@@ -256,16 +296,27 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     },
     annotations: [imfArrowAnnotation2D(clockDeg, bimf)],
   };
-  Plotly.react("plot-2d", [heatmap, boundary], layout,
+  Plotly.react("plot-2d", [heatmap, boundary, cx], layout,
                { displaylogo: false, responsive: true });
+}
+
+// ---------- speasy proxy base URL ----------
+const SPEASY_BASE = "https://sciqlop.lpp.polytechnique.fr/cache/get_data";
+
+async function fetchSpeasy(path, startTime, stopTime, extra = "") {
+  const url = `${SPEASY_BASE}?path=${encodeURIComponent(path)}&start_time=${startTime}&stop_time=${stopTime}&format=json${extra}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`speasy fetch failed (${resp.status}): ${path}`);
+  return resp.json();
 }
 
 // ---------- compute orchestration ----------
 let busy = false;
 let pendingParams = null;
-let lastRender = null;   // { data, quantity, clock, bimf } — for export theme swap
+let lastRender = null;   // { data, quantity, clock, cone, bimf } — for export theme swap
 let loadedConeKey = null;
 let loadedTiltKey = null;
+let trajectoryLoaded = false;
 
 // LRU cache of compute results, keyed by the full parameter tuple.
 // Most parameter combos cost ~3 MB (101×101 surface + 401×401 heatmap + wireframe).
@@ -273,8 +324,23 @@ let loadedTiltKey = null;
 const COMPUTE_CACHE_SIZE = 40;
 const computeCache = new Map();   // insertion-ordered → use for LRU
 
+function readBoundaryParams() {
+  const mode = document.querySelector('input[name="mp-mode"]:checked').value;
+  if (mode === "manual") {
+    return {
+      mode: "manual",
+      Pd: parseFloat(document.getElementById("pd-input").value),
+      Bz: parseFloat(document.getElementById("bz-input").value),
+    };
+  }
+  return { mode: "omni" };
+}
+
 function cacheKey(p) {
-  return `${p.quantity}|${p.clock}|${p.cone}|${p.tilt}|${p.bimf}|${p.nsw}`;
+  const b = p.boundary;
+  const bStr = b && b.mode === "manual" ? `manual|${b.Pd}|${b.Bz}` : "omni";
+  const tStr = trajectoryLoaded ? "traj" : "notraj";
+  return `${p.quantity}|${p.clock}|${p.cone}|${p.tilt}|${p.bimf}|${p.nsw}|${bStr}|${tStr}`;
 }
 
 function cacheGet(key) {
@@ -297,11 +363,12 @@ function cachePut(key, val) {
 function readParams() {
   return {
     quantity: document.querySelector('input[name="quantity"]:checked').value,
-    clock: parseFloat(document.getElementById("clock").value),
-    cone:  parseFloat(document.getElementById("cone").value),
-    tilt:  parseFloat(document.getElementById("tilt").value),
-    bimf:  parseFloat(document.getElementById("bimf").value),
-    nsw:   parseFloat(document.getElementById("nsw").value),
+    clock:    parseFloat(document.getElementById("clock").value),
+    cone:     parseFloat(document.getElementById("cone").value),
+    tilt:     parseFloat(document.getElementById("tilt").value),
+    bimf:     parseFloat(document.getElementById("bimf").value),
+    nsw:      parseFloat(document.getElementById("nsw").value),
+    boundary: readBoundaryParams(),
   };
 }
 
@@ -357,6 +424,12 @@ async function recompute() {
       render2D(data, p.quantity, p.clock, p.bimf);
       if (prof) prof.render_2d = tick() - t0;
       lastRender = { data, quantity: p.quantity, clock: p.clock, cone: p.cone, bimf: p.bimf };
+      // update crossing count in UI after first successful render
+      if (trajectoryLoaded) {
+        const sc = document.getElementById("sc-status");
+        const n = data?.crossings?.Y?.length ?? 0;
+        sc.textContent = n > 0 ? `${n} crossing${n > 1 ? "s" : ""}` : "no crossings";
+      }
 
       if (prof) {
         prof.total = tick() - tTotal0;
@@ -577,8 +650,8 @@ async function withLightTheme(fn) {
   try {
     return await fn();
   } finally {
-    render3D(data, quantity, clock, cone, bimf, "dark");
-    render2D(data, quantity, clock, bimf, "dark");
+    render3D(data, quantity, clock, cone, bimf);
+    render2D(data, quantity, clock, bimf);
   }
 }
 
@@ -640,6 +713,91 @@ function wireExport() {
   });
 }
 
+// ---------- spacecraft crossings ----------
+async function loadCrossings() {
+  const scId   = document.getElementById("sc-select").value;
+  const start  = document.getElementById("sc-start").value.replace("T", " ");
+  const end    = document.getElementById("sc-end").value.replace("T", " ");
+  const status = document.getElementById("sc-status");
+  const btn    = document.getElementById("sc-load");
+
+  if (!scId) return;
+
+  btn.disabled = true;
+  btn.textContent = "loading…";
+  status.textContent = "";
+
+  try {
+    const mode = document.querySelector('input[name="mp-mode"]:checked').value;
+    const fetches = [fetchSpeasy(`ssc/${scId}`, start, end, "&coordinate_system=gse")];
+    if (mode === "omni") {
+      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/Pressure", start, end));
+      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/BZ_GSM",  start, end));
+    }
+    const [traj, omniPd, omniBz] = await Promise.all(fetches);
+
+    const n = await call({
+      type:         "set_trajectory",
+      sc_id:        scId,
+      traj_json:    JSON.stringify(traj),
+      omni_pd_json: omniPd ? JSON.stringify(omniPd) : null,
+      omni_bz_json: omniBz ? JSON.stringify(omniBz) : null,
+    });
+
+    trajectoryLoaded = true;
+    computeCache.clear();
+    await recompute();
+
+    // n_points is in the result from the worker
+    const nCrossings = lastRender?.data?.crossings?.Y?.length ?? 0;
+    status.textContent = nCrossings > 0 ? `${nCrossings} crossing${nCrossings > 1 ? "s" : ""}` : "no crossings";
+  } catch (err) {
+    console.error(err);
+    status.textContent = `error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Load crossings";
+  }
+}
+
+function wireCrossingsPanel() {
+  const scSel  = document.getElementById("sc-select");
+  const scLoad = document.getElementById("sc-load");
+  const scStatus = document.getElementById("sc-status");
+
+  scSel.addEventListener("change", async () => {
+    scLoad.disabled = !scSel.value;
+    if (!scSel.value && trajectoryLoaded) {
+      scStatus.textContent = "";
+      await call({ type: "set_trajectory", sc_id: null,
+                   traj_json: null, omni_pd_json: null, omni_bz_json: null });
+      trajectoryLoaded = false;
+      computeCache.clear();
+      recompute();
+    }
+  });
+
+  scLoad.addEventListener("click", loadCrossings);
+
+  document.querySelectorAll('input[name="mp-mode"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      const isOmni = document.querySelector('input[name="mp-mode"]:checked').value === "omni";
+      document.getElementById("mp-manual-inputs").classList.toggle("hidden", isOmni);
+      computeCache.clear();
+      recompute();
+    });
+  });
+
+  document.getElementById("pd-input").addEventListener("change", () => {
+    computeCache.clear();
+    recompute();
+  });
+  document.getElementById("bz-input").addEventListener("change", () => {
+    computeCache.clear();
+    recompute();
+  });
+}
+
 // ---------- slider wiring ----------
 function wireSliders() {
   const ids = ["clock", "cone", "tilt", "bimf", "nsw"];
@@ -662,6 +820,7 @@ function wireSliders() {
   try {
     wireSliders();
     wireExport();
+    wireCrossingsPanel();
     setStatus("initializing worker…");
     await call({ type: "init", wheelUrl: WHEEL_URL });
     setStatus("fetching magnetopause coordinates…");

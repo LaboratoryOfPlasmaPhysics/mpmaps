@@ -4,6 +4,7 @@ Python code that runs inside Pyodide for the mpmaps webapp.
 JS calls these entry points:
 - set_coordinates(npz_bytes)          — once at startup
 - set_slices(cone_key, tilt_key, ...) — when cone or tilt changes
+- set_trajectory(sc_id, ...)          — when spacecraft / date range changes
 - compute_and_render(params)          — every parameter change
 
 The MPMap object is rebuilt only when slices change (cheap then-on),
@@ -17,6 +18,8 @@ import time
 import numpy as np
 
 
+_RE_KM = 6371.0
+
 _state = {
     "coords": None,        # dict: Xmp, Ymp, Zmp, theta, phi
     "cone_key": None,
@@ -27,6 +30,9 @@ _state = {
     "nmsp": None,          # array
     "mp": None,            # cached MPMap instance
     "mp_last": None,       # dict of bimf/nsw/clock last applied to mp
+    "trajectory": None,    # dict: sc_id, times_ns, X, Y, Z (Re)
+    "omni_pd": None,       # dict: times_ns, values (nPa) — None in manual mode
+    "omni_bz": None,       # dict: times_ns, values (nT)  — None in manual mode
 }
 
 
@@ -146,6 +152,135 @@ def _downsample(arr, step):
     return arr[::step, ::step]
 
 
+def set_trajectory(sc_id, traj_json_str, omni_pd_json_str, omni_bz_json_str):
+    """Store spacecraft trajectory and optional OMNI data in _state.
+
+    sc_id: spacecraft identifier string, or None/empty to clear.
+    traj_json_str: speasy_proxy JSON response for SSC trajectory.
+    omni_pd_json_str: speasy_proxy JSON for OMNI Pressure, or None (manual mode).
+    omni_bz_json_str: speasy_proxy JSON for OMNI BZ_GSM, or None (manual mode).
+    Returns the number of trajectory points stored.
+    """
+    import json
+
+    if not sc_id:
+        _state["trajectory"] = None
+        _state["omni_pd"] = None
+        _state["omni_bz"] = None
+        return 0
+
+    traj_data = json.loads(traj_json_str)
+    times_ns = np.array(traj_data["axes"][0]["values"], dtype=np.float64)
+    xyz_raw = np.array(traj_data["values"]["values"], dtype=np.float64)
+    _state["trajectory"] = {
+        "sc_id": sc_id,
+        "times_ns": times_ns,
+        "X": xyz_raw[:, 0] / _RE_KM,
+        "Y": xyz_raw[:, 1] / _RE_KM,
+        "Z": xyz_raw[:, 2] / _RE_KM,
+    }
+
+    def _parse_omni(json_str):
+        if not json_str:
+            return None
+        data = json.loads(json_str)
+        times = np.array(data["axes"][0]["values"], dtype=np.float64)
+        vals = np.array(data["values"]["values"], dtype=np.float64)
+        if vals.ndim > 1:
+            vals = vals[:, 0]
+        vals[np.abs(vals) > 9000] = np.nan  # replace fill values
+        return {"times_ns": times, "values": vals}
+
+    _state["omni_pd"] = _parse_omni(omni_pd_json_str)
+    _state["omni_bz"] = _parse_omni(omni_bz_json_str)
+    return len(times_ns)
+
+
+def _ns_to_iso(ns_float):
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ns_float / 1e9, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _find_crossings(mp, scalars_2d, boundary):
+    """Detect magnetopause crossings along the stored trajectory.
+
+    Uses Shue98 with either OMNI time-varying Pd/Bz (omni mode) or fixed
+    values (manual mode). Returns a dict ready for the JS Plotly render, or
+    None when no trajectory is loaded.
+    """
+    if _state["trajectory"] is None:
+        return None
+
+    from spok.models.planetary import mp_shue1998
+    from spok.coordinates.coordinates import cartesian_to_spherical
+    from scipy.interpolate import RegularGridInterpolator
+
+    traj = _state["trajectory"]
+    X = traj["X"]; Y = traj["Y"]; Z = traj["Z"]
+    times_ns = traj["times_ns"]
+    n = len(X)
+
+    r, theta, phi = cartesian_to_spherical(X, Y, Z)
+
+    mode = boundary.get("mode", "manual") if isinstance(boundary, dict) else "manual"
+    if mode == "omni" and _state["omni_pd"] is not None and _state["omni_bz"] is not None:
+        pd_data = _state["omni_pd"]
+        bz_data = _state["omni_bz"]
+        valid_pd = np.isfinite(pd_data["values"])
+        valid_bz = np.isfinite(bz_data["values"])
+        Pd_t = np.interp(times_ns, pd_data["times_ns"][valid_pd], pd_data["values"][valid_pd])
+        Bz_t = np.interp(times_ns, bz_data["times_ns"][valid_bz], bz_data["values"][valid_bz])
+    else:
+        Pd_t = np.full(n, float(boundary.get("Pd", 2.1)) if isinstance(boundary, dict) else 2.1)
+        Bz_t = np.full(n, float(boundary.get("Bz", -2.0)) if isinstance(boundary, dict) else -2.0)
+
+    # mp_shue1998 returns (X,Y,Z) by default; request scalar distance via coord_sys='spherical'
+    r_mp, _, _ = mp_shue1998(theta, phi, Pd=Pd_t, Bz=Bz_t, coord_sys="spherical")
+
+    valid = np.isfinite(r) & np.isfinite(r_mp) & np.isfinite(Pd_t) & np.isfinite(Bz_t) & (r > 0)
+    sign = np.where(valid, np.sign(r_mp - r), 0.0)
+
+    Y_c, Z_c, t_c = [], [], []
+    for i in np.where(np.diff(sign) != 0)[0]:
+        if not (valid[i] and valid[i + 1]):
+            continue
+        denom = (r_mp[i] - r[i]) - (r_mp[i + 1] - r[i + 1])
+        if denom == 0:
+            continue
+        frac = float(np.clip((r_mp[i] - r[i]) / denom, 0.0, 1.0))
+        Y_c.append(float(Y[i] + frac * (Y[i + 1] - Y[i])))
+        Z_c.append(float(Z[i] + frac * (Z[i + 1] - Z[i])))
+        t_c.append(float(times_ns[i] + frac * (times_ns[i + 1] - times_ns[i])))
+
+    if not Y_c:
+        return {"sc_id": traj["sc_id"], "X": [], "Y": [], "Z": [], "values": [], "times_iso": []}
+
+    Y_c_arr = np.array(Y_c)
+    Z_c_arr = np.array(Z_c)
+    pts = np.column_stack([Z_c_arr, Y_c_arr])
+
+    y_ax = mp.Y[0, :]
+    z_ax = mp.Z[:, 0]
+    interp_val = RegularGridInterpolator(
+        (z_ax, y_ax), scalars_2d, method="linear", bounds_error=False, fill_value=np.nan
+    )
+    interp_X = RegularGridInterpolator(
+        (z_ax, y_ax), mp.X, method="linear", bounds_error=False, fill_value=np.nan
+    )
+
+    vals = interp_val(pts)
+    X_c_arr = interp_X(pts)
+
+    return {
+        "sc_id": traj["sc_id"],
+        "X": [None if np.isnan(v) else float(v) for v in X_c_arr],
+        "Y": [float(y) for y in Y_c_arr],
+        "Z": [float(z) for z in Z_c_arr],
+        "values": [None if np.isnan(v) else float(v) for v in vals],
+        "times_iso": [_ns_to_iso(t) for t in t_c],
+    }
+
+
 def compute_and_render(params):
     """
     Compute the requested quantity and return a dict ready for Plotly:
@@ -245,6 +380,12 @@ def compute_and_render(params):
     mp_y, mp_z = _mp_terminator()
     timings["py_terminator"] = (time.perf_counter() - t0) * 1000
 
+    t0 = time.perf_counter()
+    boundary_raw = p.get("boundary") or {}
+    boundary = dict(boundary_raw) if not isinstance(boundary_raw, dict) else boundary_raw
+    crossings = _find_crossings(mp, scalars, boundary)
+    timings["py_crossings"] = (time.perf_counter() - t0) * 1000
+
     return {
         "X": X.tolist(),
         "Y": Y.tolist(),
@@ -256,5 +397,6 @@ def compute_and_render(params):
         "wireframe": wireframe,
         "mp_boundary_y": mp_y,
         "mp_boundary_z": mp_z,
+        "crossings": crossings,
         "_timings": timings,
     }
