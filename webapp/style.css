@@ -306,6 +306,17 @@ footer {
   width: 100%;
 }
 
+#params-panel > .mode-row {
+  grid-column: 1 / -1;
+}
+
+#params-inputs {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 28px;
+}
+
 #params-inputs input:disabled,
 #params-inputs output.disabled {
   opacity: 0.4;
