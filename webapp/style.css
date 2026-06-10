@@ -306,7 +306,11 @@ footer {
   width: 100%;
 }
 
-#mp-manual-inputs.hidden { display: none; }
+#params-inputs input:disabled,
+#params-inputs output.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 /* ── Spacecraft crossings panel ──────────────────────────── */
 #sc-panel {

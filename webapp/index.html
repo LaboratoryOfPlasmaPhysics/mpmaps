@@ -28,47 +28,45 @@
       <label><input type="radio" name="quantity" value="current_density"> Current density (nA/m²)</label>
     </fieldset>
 
-    <fieldset class="sliders">
-      <legend>Solar wind / IMF parameters</legend>
+    <fieldset class="sliders" id="params-panel">
+      <legend>Solar wind / IMF / Boundary</legend>
 
-      <div class="slider-row">
-        <label for="clock">IMF clock angle (°)</label>
-        <input type="range" id="clock" min="0" max="359" step="1" value="180">
-        <output for="clock" id="clock-value">180</output>
-      </div>
-
-      <div class="slider-row">
-        <label for="cone">IMF cone angle (°)</label>
-        <input type="range" id="cone" min="1" max="90" step="1" value="55">
-        <output for="cone" id="cone-value">55</output>
-      </div>
-
-      <div class="slider-row">
-        <label for="tilt">Dipole tilt (°)</label>
-        <input type="range" id="tilt" min="-30" max="30" step="1" value="0">
-        <output for="tilt" id="tilt-value">0</output>
-      </div>
-
-      <div class="slider-row">
-        <label for="bimf">IMF amplitude (nT)</label>
-        <input type="range" id="bimf" min="1" max="20" step="0.5" value="5">
-        <output for="bimf" id="bimf-value">5</output>
-      </div>
-
-      <div class="slider-row">
-        <label for="nsw">SW density (cm⁻³)</label>
-        <input type="range" id="nsw" min="1" max="30" step="0.5" value="5">
-        <output for="nsw" id="nsw-value">5</output>
-      </div>
-    </fieldset>
-
-    <fieldset id="mp-boundary-panel">
-      <legend>Magnetopause boundary</legend>
       <div class="mode-row">
         <label><input type="radio" name="mp-mode" value="manual" checked> Manual</label>
-        <label><input type="radio" name="mp-mode" value="omni"> OMNI</label>
+        <label><input type="radio" name="mp-mode" value="omni"> OMNI (at crossing time)</label>
       </div>
-      <div id="mp-manual-inputs">
+
+      <div id="params-inputs">
+        <div class="slider-row">
+          <label for="clock">IMF clock angle (°)</label>
+          <input type="range" id="clock" min="0" max="359" step="1" value="180">
+          <output for="clock" id="clock-value">180</output>
+        </div>
+
+        <div class="slider-row">
+          <label for="cone">IMF cone angle (°)</label>
+          <input type="range" id="cone" min="1" max="90" step="1" value="55">
+          <output for="cone" id="cone-value">55</output>
+        </div>
+
+        <div class="slider-row">
+          <label for="tilt">Dipole tilt (°)</label>
+          <input type="range" id="tilt" min="-30" max="30" step="1" value="0">
+          <output for="tilt" id="tilt-value">0</output>
+        </div>
+
+        <div class="slider-row">
+          <label for="bimf">IMF amplitude (nT)</label>
+          <input type="range" id="bimf" min="1" max="20" step="0.5" value="5">
+          <output for="bimf" id="bimf-value">5</output>
+        </div>
+
+        <div class="slider-row">
+          <label for="nsw">SW density (cm⁻³)</label>
+          <input type="range" id="nsw" min="1" max="30" step="0.5" value="5">
+          <output for="nsw" id="nsw-value">5</output>
+        </div>
+
         <div class="number-row">
           <label for="pd-input">Pd (nPa)</label>
           <input type="number" id="pd-input" value="2.1" min="0.1" max="20" step="0.1">

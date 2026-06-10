@@ -31,8 +31,11 @@ _state = {
     "mp": None,            # cached MPMap instance
     "mp_last": None,       # dict of bimf/nsw/clock last applied to mp
     "trajectory": None,    # dict: sc_id, times_ns, X, Y, Z (Re)
-    "omni_pd": None,       # dict: times_ns, values (nPa) — None in manual mode
-    "omni_bz": None,       # dict: times_ns, values (nT)  — None in manual mode
+    "omni_pd":      None,  # dict: times_ns, values (nPa)  — None in manual mode
+    "omni_bz":      None,  # dict: times_ns, values (nT)   — None in manual mode
+    "omni_bx":      None,  # dict: times_ns, values (nT)   — BX_GSE ≈ BX_GSM
+    "omni_by":      None,  # dict: times_ns, values (nT)   — BY_GSM
+    "omni_density": None,  # dict: times_ns, values (cm⁻³) — proton density → nsw
 }
 
 
@@ -152,21 +155,28 @@ def _downsample(arr, step):
     return arr[::step, ::step]
 
 
-def set_trajectory(sc_id, traj_json_str, omni_pd_json_str, omni_bz_json_str):
+def set_trajectory(sc_id, traj_json_str, omni_pd_json_str, omni_bz_json_str,
+                   omni_bx_json_str=None, omni_by_json_str=None, omni_density_json_str=None):
     """Store spacecraft trajectory and optional OMNI data in _state.
 
     sc_id: spacecraft identifier string, or None/empty to clear.
     traj_json_str: speasy_proxy JSON response for SSC trajectory.
-    omni_pd_json_str: speasy_proxy JSON for OMNI Pressure, or None (manual mode).
-    omni_bz_json_str: speasy_proxy JSON for OMNI BZ_GSM, or None (manual mode).
+    omni_pd_json_str: OMNI Pressure (nPa), or None in manual mode.
+    omni_bz_json_str: OMNI BZ_GSM (nT), or None in manual mode.
+    omni_bx_json_str: OMNI BX_GSE (nT), or None in manual mode.
+    omni_by_json_str: OMNI BY_GSM (nT), or None in manual mode.
+    omni_density_json_str: OMNI proton_density (cm⁻³), or None in manual mode.
     Returns the number of trajectory points stored.
     """
     import json
 
     if not sc_id:
-        _state["trajectory"] = None
-        _state["omni_pd"] = None
-        _state["omni_bz"] = None
+        _state["trajectory"]   = None
+        _state["omni_pd"]      = None
+        _state["omni_bz"]      = None
+        _state["omni_bx"]      = None
+        _state["omni_by"]      = None
+        _state["omni_density"] = None
         return 0
 
     traj_data = json.loads(traj_json_str)
@@ -191,14 +201,60 @@ def set_trajectory(sc_id, traj_json_str, omni_pd_json_str, omni_bz_json_str):
         vals[np.abs(vals) > 9000] = np.nan  # replace fill values
         return {"times_ns": times, "values": vals}
 
-    _state["omni_pd"] = _parse_omni(omni_pd_json_str)
-    _state["omni_bz"] = _parse_omni(omni_bz_json_str)
+    _state["omni_pd"]      = _parse_omni(omni_pd_json_str)
+    _state["omni_bz"]      = _parse_omni(omni_bz_json_str)
+    _state["omni_bx"]      = _parse_omni(omni_bx_json_str)
+    _state["omni_by"]      = _parse_omni(omni_by_json_str)
+    _state["omni_density"] = _parse_omni(omni_density_json_str)
     return len(times_ns)
 
 
 def _ns_to_iso(ns_float):
     from datetime import datetime, timezone
     return datetime.fromtimestamp(ns_float / 1e9, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _omni_params_at(time_ns):
+    """Interpolate all available OMNI series at a single timestamp and derive map params.
+
+    Returns a dict with keys: clock, cone, bimf, nsw, Pd, Bz (None for any missing series).
+    """
+    import math
+
+    def _interp(key):
+        d = _state.get(key)
+        if d is None:
+            return None
+        valid = np.isfinite(d["values"])
+        if not valid.any():
+            return None
+        return float(np.interp(time_ns, d["times_ns"][valid], d["values"][valid]))
+
+    bx = _interp("omni_bx")
+    by = _interp("omni_by")
+    bz = _interp("omni_bz")
+
+    clock = None
+    cone  = None
+    bimf  = None
+    if bx is not None and by is not None and bz is not None:
+        bmag = math.sqrt(bx**2 + by**2 + bz**2)
+        bimf = bmag if bmag > 0 else None
+        # clock angle: 0° = northward (Bz>0), 180° = southward, measured in YZ plane
+        clock_rad = math.atan2(by, bz)
+        clock = math.degrees(clock_rad) % 360
+        # cone angle: angle between B and Sun-Earth (X) axis; 90° = perpendicular
+        if bmag > 0:
+            cone = math.degrees(math.acos(min(1.0, abs(bx) / bmag)))
+
+    return {
+        "clock": clock,
+        "cone":  cone,
+        "bimf":  bimf,
+        "nsw":   _interp("omni_density"),
+        "Pd":    _interp("omni_pd"),
+        "Bz":    _interp("omni_bz"),
+    }
 
 
 def _find_crossings(mp, scalars_2d, boundary):
@@ -253,7 +309,8 @@ def _find_crossings(mp, scalars_2d, boundary):
         t_c.append(float(times_ns[i] + frac * (times_ns[i + 1] - times_ns[i])))
 
     if not Y_c:
-        return {"sc_id": traj["sc_id"], "X": [], "Y": [], "Z": [], "values": [], "times_iso": []}
+        return {"sc_id": traj["sc_id"], "X": [], "Y": [], "Z": [], "values": [], "times_iso": [],
+                "omni_params": None}
 
     Y_c_arr = np.array(Y_c)
     Z_c_arr = np.array(Z_c)
@@ -271,6 +328,8 @@ def _find_crossings(mp, scalars_2d, boundary):
     vals = interp_val(pts)
     X_c_arr = interp_X(pts)
 
+    omni_params = _omni_params_at(t_c[0]) if mode == "omni" else None
+
     return {
         "sc_id": traj["sc_id"],
         "X": [None if np.isnan(v) else float(v) for v in X_c_arr],
@@ -278,6 +337,7 @@ def _find_crossings(mp, scalars_2d, boundary):
         "Z": [float(z) for z in Z_c_arr],
         "values": [None if np.isnan(v) else float(v) for v in vals],
         "times_iso": [_ns_to_iso(t) for t in t_c],
+        "omni_params": omni_params,
     }
 
 

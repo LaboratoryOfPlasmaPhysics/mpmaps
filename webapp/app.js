@@ -713,6 +713,32 @@ function wireExport() {
   });
 }
 
+// ---------- param-mode helpers ----------
+function setParamsDisabled(disabled) {
+  document.querySelectorAll('#params-inputs input[type="range"], #params-inputs input[type="number"]')
+    .forEach(el => { el.disabled = disabled; });
+  document.querySelectorAll('#params-inputs output')
+    .forEach(el => el.classList.toggle("disabled", disabled));
+}
+
+function applyOmniParams(p) {
+  const setSlider = (id, val, min, max, step) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const snapped = Math.round(val / step) * step;
+    el.value = Math.max(min, Math.min(max, snapped));
+    const out = document.getElementById(`${id}-value`);
+    if (out) out.textContent = el.value;
+  };
+  if (p.clock != null) setSlider("clock", p.clock,   0,  359, 1);
+  if (p.cone  != null) setSlider("cone",  p.cone,    1,   90, 1);
+  if (p.tilt  != null) setSlider("tilt",  p.tilt,  -30,   30, 1);
+  if (p.bimf  != null) setSlider("bimf",  p.bimf,    1,   20, 0.5);
+  if (p.nsw   != null) setSlider("nsw",   p.nsw,     1,   30, 0.5);
+  if (p.Pd    != null) document.getElementById("pd-input").value = p.Pd.toFixed(2);
+  if (p.Bz    != null) document.getElementById("bz-input").value = p.Bz.toFixed(1);
+}
+
 // ---------- spacecraft crossings ----------
 async function loadCrossings() {
   const scId   = document.getElementById("sc-select").value;
@@ -731,24 +757,40 @@ async function loadCrossings() {
     const mode = document.querySelector('input[name="mp-mode"]:checked').value;
     const fetches = [fetchSpeasy(`ssc/${scId}`, start, end, "&coordinate_system=gse")];
     if (mode === "omni") {
-      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/Pressure", start, end));
-      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/BZ_GSM",  start, end));
+      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/Pressure",        start, end));
+      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/BZ_GSM",          start, end));
+      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/BX_GSE",          start, end));
+      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/BY_GSM",          start, end));
+      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/proton_density",  start, end));
     }
-    const [traj, omniPd, omniBz] = await Promise.all(fetches);
+    const [traj, omniPd, omniBz, omniBx, omniBy, omniDensity] = await Promise.all(fetches);
 
-    const n = await call({
-      type:         "set_trajectory",
-      sc_id:        scId,
-      traj_json:    JSON.stringify(traj),
-      omni_pd_json: omniPd ? JSON.stringify(omniPd) : null,
-      omni_bz_json: omniBz ? JSON.stringify(omniBz) : null,
+    await call({
+      type:              "set_trajectory",
+      sc_id:             scId,
+      traj_json:         JSON.stringify(traj),
+      omni_pd_json:      omniPd      ? JSON.stringify(omniPd)      : null,
+      omni_bz_json:      omniBz      ? JSON.stringify(omniBz)      : null,
+      omni_bx_json:      omniBx      ? JSON.stringify(omniBx)      : null,
+      omni_by_json:      omniBy      ? JSON.stringify(omniBy)      : null,
+      omni_density_json: omniDensity ? JSON.stringify(omniDensity) : null,
     });
 
     trajectoryLoaded = true;
     computeCache.clear();
     await recompute();
 
-    // n_points is in the result from the worker
+    // In OMNI mode: apply derived parameters from the first crossing, then recompute
+    // so the map reflects the solar wind conditions at the time of the crossing.
+    if (mode === "omni") {
+      const omniP = lastRender?.data?.crossings?.omni_params;
+      if (omniP) {
+        applyOmniParams(omniP);
+        computeCache.clear();
+        await recompute();
+      }
+    }
+
     const nCrossings = lastRender?.data?.crossings?.Y?.length ?? 0;
     status.textContent = nCrossings > 0 ? `${nCrossings} crossing${nCrossings > 1 ? "s" : ""}` : "no crossings";
   } catch (err) {
@@ -770,7 +812,8 @@ function wireCrossingsPanel() {
     if (!scSel.value && trajectoryLoaded) {
       scStatus.textContent = "";
       await call({ type: "set_trajectory", sc_id: null,
-                   traj_json: null, omni_pd_json: null, omni_bz_json: null });
+                   traj_json: null, omni_pd_json: null, omni_bz_json: null,
+                   omni_bx_json: null, omni_by_json: null, omni_density_json: null });
       trajectoryLoaded = false;
       computeCache.clear();
       recompute();
@@ -782,7 +825,7 @@ function wireCrossingsPanel() {
   document.querySelectorAll('input[name="mp-mode"]').forEach((radio) => {
     radio.addEventListener("change", () => {
       const isOmni = document.querySelector('input[name="mp-mode"]:checked').value === "omni";
-      document.getElementById("mp-manual-inputs").classList.toggle("hidden", isOmni);
+      setParamsDisabled(isOmni);
       computeCache.clear();
       recompute();
     });
