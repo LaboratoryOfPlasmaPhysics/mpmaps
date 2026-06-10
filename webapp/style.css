@@ -306,15 +306,15 @@ footer {
   width: 100%;
 }
 
-#params-panel > .mode-row {
+#params-panel > .mode-row,
+#params-inputs {
   grid-column: 1 / -1;
 }
 
 #params-inputs {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 #params-inputs input:disabled,
