@@ -270,6 +270,8 @@ def _find_crossings(mp, scalars_2d, boundary, params):
     """
     if _state["trajectory"] is None:
         return None
+    if boundary.get("mode") == "omni" and _state["omni_pd"] is None:
+        return None
 
     from spok.models.planetary import mp_shue1998
     from spok.coordinates.coordinates import cartesian_to_spherical

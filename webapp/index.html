@@ -33,7 +33,14 @@
 
       <div class="mode-row">
         <label><input type="radio" name="mp-mode" value="manual" checked> Manual</label>
-        <label><input type="radio" name="mp-mode" value="omni"> OMNI (at crossing time)</label>
+        <label><input type="radio" name="mp-mode" value="omni"> OMNI</label>
+      </div>
+
+      <div id="omni-ref-row" hidden>
+        <label for="omni-ref-time">OMNI time</label>
+        <input type="datetime-local" id="omni-ref-time" value="2019-06-22T12:00">
+        <button type="button" id="omni-ref-fetch">Apply</button>
+        <span id="omni-ref-status"></span>
       </div>
 
       <div id="params-inputs">
@@ -140,6 +147,8 @@
   <footer>
     <div id="status" class="status status-loading">initializing Pyodide…</div>
     <div class="links">
+      <a href="guide.html">guide</a>
+      ·
       <a href="https://github.com/LaboratoryOfPlasmaPhysics/mpmaps">github</a>
       ·
       mpmaps v0.2.0 · physics by

@@ -779,6 +779,80 @@ function applyOmniParams(p) {
   if (p.Pd    != null) document.getElementById("pd-input").value = p.Pd.toFixed(2);
 }
 
+// ---------- OMNI-at-time helpers ----------
+function interpolateSpeasyAt(series, tMs) {
+  // speasy JSON shape: axes[0].values = ns timestamps, values.values = [[scalar], ...] per row
+  if (!series) return null;
+  const axes = series.axes?.[0]?.values;
+  const vals2d = series.values?.values;
+  if (!axes?.length || !vals2d) return null;
+  // scalar series: each row is a 1-element array [v]; handle both [v] and bare v
+  const getVal = i => { const r = vals2d[i]; return Array.isArray(r) ? r[0] : r; };
+  let lo = 0, hi = axes.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (axes[m] / 1e6 < tMs) lo = m + 1; else hi = m; }
+  if (lo === 0) return getVal(0);
+  const t0 = axes[lo-1] / 1e6, t1 = axes[lo] / 1e6;
+  const v0 = getVal(lo-1), v1 = getVal(lo);
+  if (v0 == null || v1 == null) return v0 ?? v1 ?? null;
+  return v0 + (tMs - t0) / (t1 - t0) * (v1 - v0);
+}
+
+function omniParamsFromSpeasy(pd, bz, bx, by, density, tMs) {
+  const Pd  = interpolateSpeasyAt(pd,      tMs);
+  const Bz  = interpolateSpeasyAt(bz,      tMs);
+  const Bx  = interpolateSpeasyAt(bx,      tMs);
+  const By  = interpolateSpeasyAt(by,      tMs);
+  const nsw = interpolateSpeasyAt(density, tMs);
+  const bimf = (Bx != null && By != null && Bz != null)
+    ? Math.sqrt(Bx**2 + By**2 + Bz**2) : null;
+  const clock = (By != null && Bz != null)
+    ? ((Math.atan2(By, Bz) * 180 / Math.PI) + 360) % 360 : null;
+  const cone = (Bx != null && bimf > 0)
+    ? Math.acos(Math.max(-1, Math.min(1, Bx / bimf))) * 180 / Math.PI : null;
+  const clean = v => (v != null && !isNaN(v)) ? v : null;
+  return { clock: clean(clock), cone: clean(cone), bimf: clean(bimf), nsw: clean(nsw), Pd: clean(Pd) };
+}
+
+async function fetchOmniAtTime(isoStr) {
+  const status = document.getElementById("omni-ref-status");
+  const btn    = document.getElementById("omni-ref-fetch");
+  btn.disabled = true;
+  status.textContent = "fetching…";
+  try {
+    const tMs   = new Date(isoStr.slice(0, 16) + ":00Z").getTime();
+    if (isNaN(tMs)) throw new Error(`invalid OMNI time: "${isoStr}"`);
+    const start = new Date(tMs - 30*60*1000).toISOString().slice(0, 16);
+    const stop  = new Date(tMs + 30*60*1000).toISOString().slice(0, 16);
+    const omni  = (path) => fetchSpeasy(path, start, stop).catch(e => {
+      console.warn(`OMNI fetch failed (${path}):`, e); return null;
+    });
+    const [pd, bz, bx, by, density] = await Promise.all([
+      omni("cda/OMNI_HRO_1MIN/Pressure"),
+      omni("cda/OMNI_HRO_1MIN/BZ_GSM"),
+      omni("cda/OMNI_HRO_1MIN/BX_GSE"),
+      omni("cda/OMNI_HRO_1MIN/BY_GSM"),
+      omni("cda/OMNI_HRO_1MIN/proton_density"),
+    ]);
+    const p = omniParamsFromSpeasy(pd, bz, bx, by, density, tMs);
+    console.log("[OMNI-at-time] fetched params:", p);
+    const valid = Object.entries(p).filter(([, v]) => v != null);
+    if (valid.length === 0) {
+      status.textContent = "no OMNI data available";
+      return;
+    }
+    applyOmniParams(p);
+    computeCache.clear();
+    await recompute();
+    status.textContent = valid.map(([k, v]) =>
+      `${k}=${typeof v === "number" ? v.toFixed(1) : v}`).join(" ");
+  } catch (err) {
+    console.error(err);
+    status.textContent = `error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ---------- spacecraft crossings ----------
 function updateCrossingSelector(crossings) {
   const nav = document.getElementById("crossing-nav");
@@ -922,21 +996,25 @@ function wireCrossingsPanel() {
     radio.addEventListener("change", () => {
       const isOmni = document.querySelector('input[name="mp-mode"]:checked').value === "omni";
       setParamsDisabled(isOmni);
+      document.getElementById("omni-ref-row").hidden = !isOmni;
       computeCache.clear();
-      // If switching to OMNI with a trajectory already loaded, re-fetch OMNI data
-      // (manual-mode loads skip the OMNI fetch, so data isn't available yet).
-      if (isOmni && trajectoryLoaded) {
-        loadCrossings();
-      } else {
-        recompute();
-      }
+      recompute();
     });
+  });
+
+  document.getElementById("omni-ref-fetch").addEventListener("click", () => {
+    fetchOmniAtTime(document.getElementById("omni-ref-time").value);
   });
 
   document.getElementById("pd-input").addEventListener("change", () => {
     computeCache.clear();
     recompute();
   });
+
+  // Set initial visibility based on current mode (manual by default).
+  const initOmni = document.querySelector('input[name="mp-mode"]:checked').value === "omni";
+  setParamsDisabled(initOmni);
+  document.getElementById("omni-ref-row").hidden = !initOmni;
 }
 
 // ---------- slider wiring ----------
