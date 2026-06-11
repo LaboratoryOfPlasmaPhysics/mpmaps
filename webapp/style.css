@@ -391,10 +391,31 @@ footer {
   cursor: not-allowed;
 }
 
+#crossing-nav {
+  display: flex;
+  flex-direction: column;
+}
+
+#crossing-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  width: 100%;
+  cursor: pointer;
+}
+
 #sc-status {
   font-size: 12px;
   color: var(--muted);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 @media (max-width: 920px) {

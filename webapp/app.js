@@ -198,24 +198,41 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
   }));
   const [shaft, head] = imfArrow3D(clockDeg, coneDeg, bimf);
 
-  const cx = crossings && crossings.X && crossings.X.length > 0 ? {
+  const orb3d = crossings?.traj ? {
     type: "scatter3d",
-    x: crossings.X, y: crossings.Y, z: crossings.Z,
+    x: crossings.traj.X, y: crossings.traj.Y, z: crossings.traj.Z,
+    mode: "lines",
+    line: { color: "rgba(180,180,255,0.55)", width: 2 },
+    name: crossings.traj.sc_id,
+    showlegend: false, hoverinfo: "skip",
+  } : { type: "scatter3d", x: [], y: [], z: [], mode: "lines", showlegend: false, hoverinfo: "skip" };
+
+  const empty3d = { type: "scatter3d", x: [], y: [], z: [], mode: "markers", showlegend: false, hoverinfo: "skip" };
+  const hasCx = crossings && crossings.X && crossings.X.length > 0;
+  const si = selectedCrossing;
+  const othIdx = hasCx ? crossings.X.map((_, i) => i).filter(i => i !== si) : [];
+  const cxOthers = othIdx.length > 0 ? {
+    type: "scatter3d",
+    x: othIdx.map(i => crossings.X[i]), y: othIdx.map(i => crossings.Y[i]), z: othIdx.map(i => crossings.Z[i]),
     mode: "markers",
-    marker: {
-      size: 7, symbol: "diamond",
-      color: crossings.values,
-      colorscale: COLORSCALES[quantity], cmin, cmax,
-      line: { color: "white", width: 1 },
-      showscale: false,
-    },
-    text: crossings.times_iso.map((t, i) => {
+    marker: { size: 5, symbol: "diamond", color: othIdx.map(i => crossings.values[i]),
+              colorscale: COLORSCALES[quantity], cmin, cmax, opacity: 0.45, showscale: false },
+    text: othIdx.map(i => {
       const v = crossings.values[i];
-      return `${crossings.sc_id}<br>${t}<br>${TITLES[quantity]}: ${v != null ? v.toFixed(2) : "N/A"}`;
+      return `${crossings.sc_id}<br>${crossings.times_iso[i]}<br>${TITLES[quantity]}: ${v != null ? v.toFixed(2) : "N/A"}`;
     }),
-    hovertemplate: "%{text}<extra></extra>",
-    showlegend: false,
-  } : { type: "scatter3d", x: [], y: [], z: [], mode: "markers", showlegend: false, hoverinfo: "skip" };
+    hovertemplate: "%{text}<extra></extra>", showlegend: false,
+  } : empty3d;
+  const cxSel = hasCx ? {
+    type: "scatter3d",
+    x: [crossings.X[si]], y: [crossings.Y[si]], z: [crossings.Z[si]],
+    mode: "markers",
+    marker: { size: 9, symbol: "diamond", color: [crossings.values[si]],
+              colorscale: COLORSCALES[quantity], cmin, cmax,
+              line: { color: "white", width: 1.5 }, showscale: false },
+    text: [`${crossings.sc_id}<br>${crossings.times_iso[si]}<br>${TITLES[quantity]}: ${crossings.values[si] != null ? crossings.values[si].toFixed(2) : "N/A"}`],
+    hovertemplate: "%{text}<extra></extra>", showlegend: false,
+  } : empty3d;
 
   // For light-theme exports, keep the outer paper transparent so the
   // snapshotPlot composite can layer the WebGL canvas pixels underneath
@@ -234,7 +251,7 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
-  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, cx], layout,
+  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel], layout,
                { displaylogo: false, responsive: true });
 }
 
@@ -261,24 +278,41 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     showlegend: false, hoverinfo: "skip",
   };
 
-  const cx = crossings && crossings.Y && crossings.Y.length > 0 ? {
+  const orb2d = crossings?.traj ? {
     type: "scatter",
-    x: crossings.Y, y: crossings.Z,
+    x: crossings.traj.Y, y: crossings.traj.Z,
+    mode: "lines",
+    line: { color: "rgba(180,180,255,0.55)", width: 1.5 },
+    name: crossings.traj.sc_id,
+    showlegend: false, hoverinfo: "skip",
+  } : { type: "scatter", x: [], y: [], mode: "lines", showlegend: false, hoverinfo: "skip" };
+
+  const empty2d = { type: "scatter", x: [], y: [], mode: "markers", showlegend: false, hoverinfo: "skip" };
+  const hasCx2 = crossings && crossings.Y && crossings.Y.length > 0;
+  const si2 = selectedCrossing;
+  const othIdx2 = hasCx2 ? crossings.Y.map((_, i) => i).filter(i => i !== si2) : [];
+  const cxOthers2 = othIdx2.length > 0 ? {
+    type: "scatter",
+    x: othIdx2.map(i => crossings.Y[i]), y: othIdx2.map(i => crossings.Z[i]),
     mode: "markers",
-    marker: {
-      size: 10, symbol: "diamond",
-      color: crossings.values,
-      colorscale: COLORSCALES[quantity], cmin, cmax,
-      line: { color: "white", width: 1.5 },
-      showscale: false,
-    },
-    text: crossings.times_iso.map((ts, i) => {
+    marker: { size: 7, symbol: "diamond", color: othIdx2.map(i => crossings.values[i]),
+              colorscale: COLORSCALES[quantity], cmin, cmax, opacity: 0.45, showscale: false },
+    text: othIdx2.map(i => {
       const v = crossings.values[i];
-      return `${crossings.sc_id}<br>${ts}<br>${TITLES[quantity]}: ${v != null ? v.toFixed(2) : "N/A"}`;
+      return `${crossings.sc_id}<br>${crossings.times_iso[i]}<br>${TITLES[quantity]}: ${v != null ? v.toFixed(2) : "N/A"}`;
     }),
-    hovertemplate: "%{text}<extra></extra>",
-    showlegend: false,
-  } : { type: "scatter", x: [], y: [], mode: "markers", showlegend: false, hoverinfo: "skip" };
+    hovertemplate: "%{text}<extra></extra>", showlegend: false,
+  } : empty2d;
+  const cxSel2 = hasCx2 ? {
+    type: "scatter",
+    x: [crossings.Y[si2]], y: [crossings.Z[si2]],
+    mode: "markers",
+    marker: { size: 12, symbol: "diamond", color: [crossings.values[si2]],
+              colorscale: COLORSCALES[quantity], cmin, cmax,
+              line: { color: "white", width: 2 }, showscale: false },
+    text: [`${crossings.sc_id}<br>${crossings.times_iso[si2]}<br>${TITLES[quantity]}: ${crossings.values[si2] != null ? crossings.values[si2].toFixed(2) : "N/A"}`],
+    hovertemplate: "%{text}<extra></extra>", showlegend: false,
+  } : empty2d;
 
   const layout = {
     paper_bgcolor: t.paper, plot_bgcolor: t.plot,
@@ -296,18 +330,24 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     },
     annotations: [imfArrowAnnotation2D(clockDeg, bimf)],
   };
-  Plotly.react("plot-2d", [heatmap, boundary, cx], layout,
+  Plotly.react("plot-2d", [heatmap, boundary, orb2d, cxOthers2, cxSel2], layout,
                { displaylogo: false, responsive: true });
 }
 
 // ---------- speasy proxy base URL ----------
-const SPEASY_BASE = "https://sciqlop.lpp.polytechnique.fr/cache/get_data";
+const SPEASY_BASE = "https://sciqlop.lpp.polytechnique.fr/cache-dev/get_data";
 
 async function fetchSpeasy(path, startTime, stopTime, extra = "") {
-  const url = `${SPEASY_BASE}?path=${encodeURIComponent(path)}&start_time=${startTime}&stop_time=${stopTime}&format=json${extra}`;
+  const url = `${SPEASY_BASE}?path=${encodeURIComponent(path)}&start_time=${encodeURIComponent(startTime)}&stop_time=${encodeURIComponent(stopTime)}&format=json${extra}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`speasy fetch failed (${resp.status}): ${path}`);
-  return resp.json();
+  // The proxy emits bare NaN tokens (invalid JSON) for fill values — sanitize before parsing.
+  const text = await resp.text();
+  try {
+    return JSON.parse(text.replace(/\bNaN\b/g, "null"));
+  } catch {
+    throw new Error(`speasy response not JSON for ${path}: ${text.slice(0, 200)}`);
+  }
 }
 
 // ---------- compute orchestration ----------
@@ -317,6 +357,8 @@ let lastRender = null;   // { data, quantity, clock, cone, bimf } — for export
 let loadedConeKey = null;
 let loadedTiltKey = null;
 let trajectoryLoaded = false;
+let perCrossingOmni = [];   // omni param dict per crossing (empty list = none loaded)
+let selectedCrossing = 0;   // index into perCrossingOmni / crossings arrays
 
 // LRU cache of compute results, keyed by the full parameter tuple.
 // Most parameter combos cost ~3 MB (101×101 surface + 401×401 heatmap + wireframe).
@@ -330,7 +372,6 @@ function readBoundaryParams() {
     return {
       mode: "manual",
       Pd: parseFloat(document.getElementById("pd-input").value),
-      Bz: parseFloat(document.getElementById("bz-input").value),
     };
   }
   return { mode: "omni" };
@@ -338,7 +379,7 @@ function readBoundaryParams() {
 
 function cacheKey(p) {
   const b = p.boundary;
-  const bStr = b && b.mode === "manual" ? `manual|${b.Pd}|${b.Bz}` : "omni";
+  const bStr = b && b.mode === "manual" ? `manual|${b.Pd}` : "omni";
   const tStr = trajectoryLoaded ? "traj" : "notraj";
   return `${p.quantity}|${p.clock}|${p.cone}|${p.tilt}|${p.bimf}|${p.nsw}|${bStr}|${tStr}`;
 }
@@ -736,14 +777,45 @@ function applyOmniParams(p) {
   if (p.bimf  != null) setSlider("bimf",  p.bimf,    1,   20, 0.5);
   if (p.nsw   != null) setSlider("nsw",   p.nsw,     1,   30, 0.5);
   if (p.Pd    != null) document.getElementById("pd-input").value = p.Pd.toFixed(2);
-  if (p.Bz    != null) document.getElementById("bz-input").value = p.Bz.toFixed(1);
 }
 
 // ---------- spacecraft crossings ----------
+function updateCrossingSelector(crossings) {
+  const nav = document.getElementById("crossing-nav");
+  const sel = document.getElementById("crossing-select");
+  const times = crossings?.times_iso ?? [];
+  if (times.length <= 1) { nav.hidden = true; return; }
+  sel.innerHTML = "";
+  times.forEach((t, i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = `#${i + 1}  ${t.replace("T", " ").replace("Z", " UTC")}`;
+    sel.appendChild(opt);
+  });
+  sel.value = selectedCrossing;
+  nav.hidden = false;
+}
+
+function prefetchCrossingSlices(omniList) {
+  const seen = new Set();
+  for (const p of omniList) {
+    if (!p || p.cone == null || p.tilt == null) continue;
+    const coneKey = `${Math.min(90, Math.max(1, Math.round(p.cone)))}`;
+    const tiltKey = `${Math.min(30, Math.max(-30, Math.round(p.tilt ?? 0)))}`;
+    const key = `${coneKey}|${tiltKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fetchSlice(`bmsh_cone${coneKey}.npz`).catch(() => {});
+    fetchSlice(`nmsh_cone${coneKey}.npz`).catch(() => {});
+    fetchSlice(`bmsp_tilt${tiltKey}.npz`).catch(() => {});
+    fetchSlice(`nmsp_tilt${tiltKey}.npz`).catch(() => {});
+  }
+}
+
 async function loadCrossings() {
   const scId   = document.getElementById("sc-select").value;
-  const start  = document.getElementById("sc-start").value.replace("T", " ");
-  const end    = document.getElementById("sc-end").value.replace("T", " ");
+  const start  = document.getElementById("sc-start").value;
+  const end    = document.getElementById("sc-end").value;
   const status = document.getElementById("sc-status");
   const btn    = document.getElementById("sc-load");
 
@@ -751,20 +823,27 @@ async function loadCrossings() {
 
   btn.disabled = true;
   btn.textContent = "loading…";
-  status.textContent = "";
 
   try {
     const mode = document.querySelector('input[name="mp-mode"]:checked').value;
+    status.textContent = mode === "omni" ? "fetching trajectory & solar wind…" : "fetching trajectory…";
+
+    // Wrap each OMNI fetch individually: a bad variable name returns 200+HTML on
+    // some servers, making resp.json() throw; we degrade to null rather than aborting.
+    const omni = (path) => fetchSpeasy(path, start, end).catch(e => {
+      console.warn(`OMNI fetch failed (${path}):`, e); return null;
+    });
     const fetches = [fetchSpeasy(`ssc/${scId}`, start, end, "&coordinate_system=gse")];
     if (mode === "omni") {
-      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/Pressure",        start, end));
-      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/BZ_GSM",          start, end));
-      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/BX_GSE",          start, end));
-      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/BY_GSM",          start, end));
-      fetches.push(fetchSpeasy("cda/OMNI_HRO_1MIN/proton_density",  start, end));
+      fetches.push(omni("cda/OMNI_HRO_1MIN/Pressure"));
+      fetches.push(omni("cda/OMNI_HRO_1MIN/BZ_GSM"));
+      fetches.push(omni("cda/OMNI_HRO_1MIN/BX_GSE"));
+      fetches.push(omni("cda/OMNI_HRO_1MIN/BY_GSM"));
+      fetches.push(omni("cda/OMNI_HRO_1MIN/proton_density"));
     }
     const [traj, omniPd, omniBz, omniBx, omniBy, omniDensity] = await Promise.all(fetches);
 
+    status.textContent = "detecting crossings…";
     await call({
       type:              "set_trajectory",
       sc_id:             scId,
@@ -777,18 +856,22 @@ async function loadCrossings() {
     });
 
     trajectoryLoaded = true;
+    selectedCrossing = 0;
     computeCache.clear();
     await recompute();
 
-    // In OMNI mode: apply derived parameters from the first crossing, then recompute
-    // so the map reflects the solar wind conditions at the time of the crossing.
-    if (mode === "omni") {
-      const omniP = lastRender?.data?.crossings?.omni_params;
-      if (omniP) {
-        applyOmniParams(omniP);
-        computeCache.clear();
-        await recompute();
-      }
+    // Populate per-crossing OMNI list and crossing selector.
+    perCrossingOmni = lastRender?.data?.crossings?.omni_params ?? [];
+    updateCrossingSelector(lastRender?.data?.crossings);
+
+    // In OMNI mode: apply conditions at the first crossing and recompute.
+    if (mode === "omni" && perCrossingOmni[0]) {
+      status.textContent = "applying OMNI conditions…";
+      applyOmniParams(perCrossingOmni[0]);
+      computeCache.clear();
+      await recompute();
+      // Background-prefetch slices for all other crossings' cone/tilt keys.
+      prefetchCrossingSlices(perCrossingOmni.slice(1));
     }
 
     const nCrossings = lastRender?.data?.crossings?.Y?.length ?? 0;
@@ -815,8 +898,21 @@ function wireCrossingsPanel() {
                    traj_json: null, omni_pd_json: null, omni_bz_json: null,
                    omni_bx_json: null, omni_by_json: null, omni_density_json: null });
       trajectoryLoaded = false;
+      perCrossingOmni = [];
+      selectedCrossing = 0;
+      document.getElementById("crossing-nav").hidden = true;
       computeCache.clear();
       recompute();
+    }
+  });
+
+  document.getElementById("crossing-select").addEventListener("change", async () => {
+    selectedCrossing = parseInt(document.getElementById("crossing-select").value);
+    const p = perCrossingOmni[selectedCrossing];
+    if (p) {
+      applyOmniParams(p);
+      computeCache.clear();
+      await recompute();
     }
   });
 
@@ -827,15 +923,17 @@ function wireCrossingsPanel() {
       const isOmni = document.querySelector('input[name="mp-mode"]:checked').value === "omni";
       setParamsDisabled(isOmni);
       computeCache.clear();
-      recompute();
+      // If switching to OMNI with a trajectory already loaded, re-fetch OMNI data
+      // (manual-mode loads skip the OMNI fetch, so data isn't available yet).
+      if (isOmni && trajectoryLoaded) {
+        loadCrossings();
+      } else {
+        recompute();
+      }
     });
   });
 
   document.getElementById("pd-input").addEventListener("change", () => {
-    computeCache.clear();
-    recompute();
-  });
-  document.getElementById("bz-input").addEventListener("change", () => {
     computeCache.clear();
     recompute();
   });

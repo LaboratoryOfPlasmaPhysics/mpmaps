@@ -217,7 +217,7 @@ def _ns_to_iso(ns_float):
 def _omni_params_at(time_ns):
     """Interpolate all available OMNI series at a single timestamp and derive map params.
 
-    Returns a dict with keys: clock, cone, bimf, nsw, Pd, Bz (None for any missing series).
+    Returns a dict with keys: clock, cone, bimf, nsw, Pd (None for any missing series).
     """
     import math
 
@@ -237,15 +237,20 @@ def _omni_params_at(time_ns):
     clock = None
     cone  = None
     bimf  = None
-    if bx is not None and by is not None and bz is not None:
-        bmag = math.sqrt(bx**2 + by**2 + bz**2)
-        bimf = bmag if bmag > 0 else None
-        # clock angle: 0° = northward (Bz>0), 180° = southward, measured in YZ plane
+    # clock and bimf need only By+Bz (YZ-plane); cone additionally needs Bx.
+    if by is not None and bz is not None:
+        Byz = math.sqrt(by**2 + bz**2)
         clock_rad = math.atan2(by, bz)
         clock = math.degrees(clock_rad) % 360
-        # cone angle: angle between B and Sun-Earth (X) axis; 90° = perpendicular
-        if bmag > 0:
-            cone = math.degrees(math.acos(min(1.0, abs(bx) / bmag)))
+        if bx is not None:
+            bmag = math.sqrt(bx**2 + by**2 + bz**2)
+            bimf = bmag if bmag > 0 else None
+            if bmag > 0:
+                cone = math.degrees(math.acos(min(1.0, abs(bx) / bmag)))
+        else:
+            # Bx unavailable: approximate bimf from transverse component only
+            bimf = Byz if Byz > 0 else None
+            # cone left as None → slider not updated, keeps its current value
 
     return {
         "clock": clock,
@@ -253,16 +258,15 @@ def _omni_params_at(time_ns):
         "bimf":  bimf,
         "nsw":   _interp("omni_density"),
         "Pd":    _interp("omni_pd"),
-        "Bz":    _interp("omni_bz"),
     }
 
 
-def _find_crossings(mp, scalars_2d, boundary):
+def _find_crossings(mp, scalars_2d, boundary, params):
     """Detect magnetopause crossings along the stored trajectory.
 
-    Uses Shue98 with either OMNI time-varying Pd/Bz (omni mode) or fixed
-    values (manual mode). Returns a dict ready for the JS Plotly render, or
-    None when no trajectory is loaded.
+    Bz for Shue98 is always bimf * cos(clock): in manual mode from params;
+    in OMNI mode from the stored omni_bz series (algebraically equivalent).
+    Returns a dict ready for the JS Plotly render, or None when no trajectory is loaded.
     """
     if _state["trajectory"] is None:
         return None
@@ -276,6 +280,13 @@ def _find_crossings(mp, scalars_2d, boundary):
     times_ns = traj["times_ns"]
     n = len(X)
 
+    traj_path = {
+        "sc_id": traj["sc_id"],
+        "X": X.astype(np.float32).tolist(),
+        "Y": Y.astype(np.float32).tolist(),
+        "Z": Z.astype(np.float32).tolist(),
+    }
+
     r, theta, phi = cartesian_to_spherical(X, Y, Z)
 
     mode = boundary.get("mode", "manual") if isinstance(boundary, dict) else "manual"
@@ -288,7 +299,9 @@ def _find_crossings(mp, scalars_2d, boundary):
         Bz_t = np.interp(times_ns, bz_data["times_ns"][valid_bz], bz_data["values"][valid_bz])
     else:
         Pd_t = np.full(n, float(boundary.get("Pd", 2.1)) if isinstance(boundary, dict) else 2.1)
-        Bz_t = np.full(n, float(boundary.get("Bz", -2.0)) if isinstance(boundary, dict) else -2.0)
+        clock_rad = np.deg2rad(float(params.get("clock", 180)))
+        bimf_val  = float(params.get("bimf", 5.0))
+        Bz_t = np.full(n, bimf_val * np.cos(clock_rad))
 
     # mp_shue1998 returns (X,Y,Z) by default; request scalar distance via coord_sys='spherical'
     r_mp, _, _ = mp_shue1998(theta, phi, Pd=Pd_t, Bz=Bz_t, coord_sys="spherical")
@@ -310,7 +323,7 @@ def _find_crossings(mp, scalars_2d, boundary):
 
     if not Y_c:
         return {"sc_id": traj["sc_id"], "X": [], "Y": [], "Z": [], "values": [], "times_iso": [],
-                "omni_params": None}
+                "omni_params": [], "traj": traj_path}
 
     Y_c_arr = np.array(Y_c)
     Z_c_arr = np.array(Z_c)
@@ -328,7 +341,9 @@ def _find_crossings(mp, scalars_2d, boundary):
     vals = interp_val(pts)
     X_c_arr = interp_X(pts)
 
-    omni_params = _omni_params_at(t_c[0]) if mode == "omni" else None
+    per_crossing_omni = (
+        [_omni_params_at(t) for t in t_c] if mode == "omni" else [None] * len(t_c)
+    )
 
     return {
         "sc_id": traj["sc_id"],
@@ -337,7 +352,8 @@ def _find_crossings(mp, scalars_2d, boundary):
         "Z": [float(z) for z in Z_c_arr],
         "values": [None if np.isnan(v) else float(v) for v in vals],
         "times_iso": [_ns_to_iso(t) for t in t_c],
-        "omni_params": omni_params,
+        "omni_params": per_crossing_omni,
+        "traj": traj_path,
     }
 
 
@@ -443,7 +459,7 @@ def compute_and_render(params):
     t0 = time.perf_counter()
     boundary_raw = p.get("boundary") or {}
     boundary = dict(boundary_raw) if not isinstance(boundary_raw, dict) else boundary_raw
-    crossings = _find_crossings(mp, scalars, boundary)
+    crossings = _find_crossings(mp, scalars, boundary, p)
     timings["py_crossings"] = (time.perf_counter() - t0) * 1000
 
     return {
