@@ -1,10 +1,14 @@
 // Pyodide-hosting Web Worker — keeps the heavy Python compute off the UI thread.
 // Protocol:
-//   in:  {type: 'init',            wheelUrl, appPySrc}
-//   in:  {type: 'set_coordinates', bytes,                     requestId}
-//   in:  {type: 'set_slices',      cone_key, tilt_key,
-//                                  bmsh, nmsh, bmsp, nmsp,   requestId}
-//   in:  {type: 'compute',         params,                    requestId}
+//   in:  {type: 'init',             wheelUrl, appPySrc}
+//   in:  {type: 'set_coordinates',  bytes,                              requestId}
+//   in:  {type: 'set_slices',       cone_key, tilt_key,
+//                                   bmsh, nmsh, bmsp, nmsp,            requestId}
+//   in:  {type: 'set_trajectory',   sc_id, traj_json,
+//                                   omni_pd_json, omni_bz_json,
+//                                   omni_bx_json, omni_by_json, omni_density_json,
+//                                                                       requestId}
+//   in:  {type: 'compute',          params,                             requestId}
 //   out: {type: 'status', msg}
 //   out: {type: 'ack'   | 'result' | 'error', requestId, ...}
 
@@ -75,6 +79,20 @@ pyodide_app.set_slices(
 )
       `);
       ack(msg.requestId);
+
+    } else if (msg.type === "set_trajectory") {
+      pyodide.globals.set("_sc_id",             msg.sc_id             ?? null);
+      pyodide.globals.set("_traj_json",         msg.traj_json         ?? null);
+      pyodide.globals.set("_omni_pd_json",      msg.omni_pd_json      ?? null);
+      pyodide.globals.set("_omni_bz_json",      msg.omni_bz_json      ?? null);
+      pyodide.globals.set("_omni_bx_json",      msg.omni_bx_json      ?? null);
+      pyodide.globals.set("_omni_by_json",      msg.omni_by_json      ?? null);
+      pyodide.globals.set("_omni_density_json", msg.omni_density_json ?? null);
+      const n = await pyodide.runPythonAsync(
+        `pyodide_app.set_trajectory(_sc_id, _traj_json, _omni_pd_json, _omni_bz_json,
+                                    _omni_bx_json, _omni_by_json, _omni_density_json)`
+      );
+      result(msg.requestId, { n_points: n });
 
     } else if (msg.type === "compute") {
       const tPy0 = performance.now();

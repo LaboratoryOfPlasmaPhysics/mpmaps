@@ -28,37 +28,84 @@
       <label><input type="radio" name="quantity" value="current_density"> Current density (nA/m²)</label>
     </fieldset>
 
-    <fieldset class="sliders">
-      <legend>Solar wind / IMF parameters</legend>
+    <fieldset class="sliders" id="params-panel">
+      <legend>Solar wind / IMF / Boundary</legend>
 
-      <div class="slider-row">
-        <label for="clock">IMF clock angle (°)</label>
-        <input type="range" id="clock" min="0" max="359" step="1" value="180">
-        <output for="clock" id="clock-value">180</output>
+      <div class="mode-row">
+        <label><input type="radio" name="mp-mode" value="manual" checked> Manual</label>
+        <label><input type="radio" name="mp-mode" value="omni"> OMNI (at crossing time)</label>
       </div>
 
-      <div class="slider-row">
-        <label for="cone">IMF cone angle (°)</label>
-        <input type="range" id="cone" min="1" max="90" step="1" value="55">
-        <output for="cone" id="cone-value">55</output>
-      </div>
+      <div id="params-inputs">
+        <div class="slider-row">
+          <label for="clock">IMF clock angle (°)</label>
+          <input type="range" id="clock" min="0" max="359" step="1" value="180">
+          <output for="clock" id="clock-value">180</output>
+        </div>
 
-      <div class="slider-row">
-        <label for="tilt">Dipole tilt (°)</label>
-        <input type="range" id="tilt" min="-30" max="30" step="1" value="0">
-        <output for="tilt" id="tilt-value">0</output>
-      </div>
+        <div class="slider-row">
+          <label for="cone">IMF cone angle (°)</label>
+          <input type="range" id="cone" min="1" max="90" step="1" value="55">
+          <output for="cone" id="cone-value">55</output>
+        </div>
 
-      <div class="slider-row">
-        <label for="bimf">IMF amplitude (nT)</label>
-        <input type="range" id="bimf" min="1" max="20" step="0.5" value="5">
-        <output for="bimf" id="bimf-value">5</output>
-      </div>
+        <div class="slider-row">
+          <label for="tilt">Dipole tilt (°)</label>
+          <input type="range" id="tilt" min="-30" max="30" step="1" value="0">
+          <output for="tilt" id="tilt-value">0</output>
+        </div>
 
-      <div class="slider-row">
-        <label for="nsw">SW density (cm⁻³)</label>
-        <input type="range" id="nsw" min="1" max="30" step="0.5" value="5">
-        <output for="nsw" id="nsw-value">5</output>
+        <div class="slider-row">
+          <label for="bimf">IMF amplitude (nT)</label>
+          <input type="range" id="bimf" min="1" max="20" step="0.5" value="5">
+          <output for="bimf" id="bimf-value">5</output>
+        </div>
+
+        <div class="slider-row">
+          <label for="nsw">SW density (cm⁻³)</label>
+          <input type="range" id="nsw" min="1" max="30" step="0.5" value="5">
+          <output for="nsw" id="nsw-value">5</output>
+        </div>
+
+        <div class="number-row">
+          <label for="pd-input">Pd (nPa)</label>
+          <input type="number" id="pd-input" value="2.1" min="0.1" max="20" step="0.1">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset id="sc-panel">
+      <legend>Spacecraft crossings</legend>
+      <select id="sc-select">
+        <option value="">— none —</option>
+        <option value="mms1">MMS-1</option>
+        <option value="mms2">MMS-2</option>
+        <option value="mms3">MMS-3</option>
+        <option value="mms4">MMS-4</option>
+        <option value="cluster1">Cluster-1</option>
+        <option value="cluster2">Cluster-2</option>
+        <option value="cluster3">Cluster-3</option>
+        <option value="cluster4">Cluster-4</option>
+        <option value="themisa">THEMIS-A</option>
+        <option value="themisb">THEMIS-B</option>
+        <option value="themisc">THEMIS-C</option>
+        <option value="themisd">THEMIS-D</option>
+        <option value="themise">THEMIS-E</option>
+        <option value="geotail">Geotail</option>
+        <option value="doublestar1">Double Star TC-1</option>
+      </select>
+      <div class="date-row">
+        <label for="sc-start">From</label>
+        <input type="datetime-local" id="sc-start" value="2019-06-22T00:00">
+        <label for="sc-end">To</label>
+        <input type="datetime-local" id="sc-end" value="2019-06-23T00:00">
+      </div>
+      <div class="sc-actions">
+        <button type="button" id="sc-load" disabled>Load crossings</button>
+        <span id="sc-status"></span>
+      </div>
+      <div id="crossing-nav" hidden>
+        <select id="crossing-select"></select>
       </div>
     </fieldset>
 
