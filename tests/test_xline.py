@@ -98,3 +98,24 @@ def test_integrated_rate_clips_poleward_of_cusp():
     curve = _straight_curve_along_y(zval=10.0, y0=-4.0, y1=4.0, n=81)
     J = DominantXLine(m).integrated_rate(curve, cusp_z=6.0)
     assert J == pytest.approx(0.0, abs=1e-9)
+
+
+def _R_peaked_at(zpeak, ny=41, nz=41, extent=20.0, width=2.0):
+    y = np.linspace(-extent, extent, ny)
+    z = np.linspace(-extent, extent, nz)
+    Y, Z = np.meshgrid(y, z)
+    return np.exp(-((Z - zpeak) ** 2) / (2 * width ** 2)) * np.ones_like(Y)
+
+
+def test_xline_picks_seed_at_the_rate_peak():
+    # Uniform +y bisector: each candidate is a constant-z line. R peaks at z=3,
+    # so the dominant X-line should be seeded near z=3.
+    ny = nz = 41
+    f = _uniform_field((0, 1, 0), ny=ny, nz=nz)
+    R = _R_peaked_at(3.0, ny=ny, nz=nz, extent=20.0)
+    m = _FakeMap(bmsh=f, bmsp=f, R=R, ny=ny, nz=nz, extent=20.0)
+    result = DominantXLine(m).xline(cusp_z=6.0, n_scan=25, step=0.25)
+    assert result["z_seed"] == pytest.approx(3.0, abs=0.5)
+    assert np.allclose(result["z"], result["z_seed"], atol=1e-6)
+    assert result["J"] > 0.0
+    assert len(result["R"]) == len(result["x"])

@@ -9,6 +9,7 @@ curves, and returns the one maximizing the integrated Cassak-Shay rate.
 """
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
+from scipy.optimize import minimize_scalar
 
 _EPS = 1e-9
 
@@ -222,3 +223,42 @@ class DominantXLine:
         inside = np.abs(z[:-1]) <= cusp_z
         valid = inside & np.isfinite(Rmid)
         return float(np.sum(Rmid[valid] * ds[valid]))
+
+    def _seed_range(self):
+        """(zmin, zmax) of the noon meridian where the surface is dayside."""
+        z_axis = self.mp.Z[:, 0]
+        xi = self._interp(self.mp.X)
+        xvals = xi(np.column_stack([z_axis, np.zeros_like(z_axis)]))
+        good = z_axis[np.isfinite(xvals) & (xvals >= 1.0)]
+        return float(good.min()), float(good.max())
+
+    def _J_of_seed(self, z_seed, cusp_z, step):
+        return self.integrated_rate(self.candidate(z_seed, step=step), cusp_z=cusp_z)
+
+    def xline(self, cusp_z=6.0, n_scan=21, step=0.1):
+        """Dominant X-line = argmax over noon-meridian seeds of J = int R ds.
+
+        Coarse-scans ``n_scan`` seeds to bracket the peak, then refines with a
+        bounded golden-section search. Returns the winning curve, R along it,
+        its J and seed.
+        """
+        zmin, zmax = self._seed_range()
+        seeds = np.linspace(zmin, zmax, n_scan)
+        Js = np.array([self._J_of_seed(s, cusp_z, step) for s in seeds])
+        k = int(np.nanargmax(Js))
+        lo = seeds[max(k - 1, 0)]
+        hi = seeds[min(k + 1, n_scan - 1)]
+        if hi > lo:
+            opt = minimize_scalar(
+                lambda s: -self._J_of_seed(s, cusp_z, step),
+                bounds=(lo, hi), method="bounded",
+            )
+            z_best = float(opt.x)
+        else:
+            z_best = float(seeds[k])
+        curve = self.candidate(z_best, step=step)
+        ri = self._interp(self.mp.reconnection_rate())
+        R = ri(np.column_stack([curve["z"], curve["y"]]))
+        J = self.integrated_rate(curve, cusp_z=cusp_z)
+        return {"x": curve["x"], "y": curve["y"], "z": curve["z"],
+                "R": R, "J": J, "z_seed": z_best}
