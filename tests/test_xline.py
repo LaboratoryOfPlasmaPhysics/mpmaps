@@ -56,3 +56,36 @@ def test_bisection_of_antiparallel_fields_is_nan():
                  bmsp=_uniform_field((0.0, -1.0, 0.0)))
     dx, dy, dz = DominantXLine(m).bisection_field()
     assert np.all(np.isnan(dx)) and np.all(np.isnan(dy)) and np.all(np.isnan(dz))
+
+
+def test_candidate_uniform_field_vertical_line():
+    """Uniform +z field → vertical line at y=y_start."""
+    m = _FakeMap(bmsh=_uniform_field((0.0, 0.0, 1.0)),
+                 bmsp=_uniform_field((0.0, 0.0, 1.0)))
+    result = DominantXLine(m).candidate(z_seed=0.0)
+    # Seed at (X(0,0), 0, 0); trace in +z → curve lies on y≈0
+    assert result["y"].std() < 0.1  # y stays near 0
+    # Curve extends both directions in z from seed
+    assert np.min(result["z"]) < 0.0 and np.max(result["z"]) > 0.0
+
+
+def test_candidate_uniform_field_45deg_line():
+    """Uniform +(y+z)/√2 bisector → 45° line in (Y,Z)."""
+    m = _FakeMap(bmsh=_uniform_field((0.0, 1.0, 1.0)),
+                 bmsp=_uniform_field((0.0, 1.0, 1.0)))
+    result = DominantXLine(m).candidate(z_seed=0.0)
+    # Seed at (X(0,0), 0, 0); trace along +y and +z equally
+    ys, zs = result["y"], result["z"]
+    # Check (z - z_seed) ≈ (y - y_start) for the forward segment
+    forward_idx = zs > 0
+    assert np.allclose(zs[forward_idx], ys[forward_idx], atol=0.5)
+
+
+def test_candidate_dict_keys():
+    """candidate() returns a dict with keys x, y, z."""
+    m = _FakeMap(bmsh=_uniform_field((0.0, 1.0, 0.0)),
+                 bmsp=_uniform_field((0.0, 1.0, 0.0)))
+    result = DominantXLine(m).candidate(z_seed=2.0)
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"x", "y", "z"}
+    assert result["x"].shape == result["y"].shape == result["z"].shape
