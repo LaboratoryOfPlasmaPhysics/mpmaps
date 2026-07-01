@@ -204,3 +204,65 @@ class DominantXLine:
         zs = np.array([p[2] for p in pts])
 
         return {"x": xs, "y": ys, "z": zs}
+
+    def integrated_rate(self, curve, cusp_z=6.0):
+        """Integrated Cassak-Shay reconnection rate along a candidate X-line curve.
+
+        J = ∫ R ds, with R from reconnection_rate() interpolated onto the curve and ds
+        the 3D arc-length between successive points. The integral accumulates only over the
+        segment equatorward of both cusps — curve points with |Z| ≤ cusp_z contribute.
+
+        Args:
+            curve: dict {"x": x_array, "y": y_array, "z": z_array} as returned by candidate().
+            cusp_z: absolute cusp latitude in Re (default 6.0; only |Z| ≤ cusp_z contributes).
+
+        Returns:
+            float: integrated rate J in mV/m·Re (or equivalent units depending on reconnection_rate output).
+        """
+        # Get the reconnection rate field and build an interpolator
+        R_field = self.mp.reconnection_rate()
+        r_interp = self._interp(R_field)
+
+        # Extract curve points
+        xs = curve["x"]
+        ys = curve["y"]
+        zs = curve["z"]
+
+        # Accumulate the integral
+        integral = 0.0
+        for i in range(len(xs) - 1):
+            z_curr = zs[i]
+            z_next = zs[i + 1]
+
+            # Only integrate if at least one endpoint is equatorward of the cusp boundary
+            # (More precisely: only accumulate segments where both endpoints satisfy |Z| <= cusp_z)
+            if abs(z_curr) > cusp_z or abs(z_next) > cusp_z:
+                # Check if either point is within the boundary
+                if abs(z_curr) <= cusp_z:
+                    # Current point is valid, clip next if needed
+                    pass
+                elif abs(z_next) <= cusp_z:
+                    # Next point is valid, clip current if needed
+                    pass
+                else:
+                    # Both outside, skip this segment
+                    continue
+
+            # Evaluate the rate at the current point
+            y_curr = ys[i]
+            r_curr = r_interp([[z_curr, y_curr]])[0]
+
+            # Handle NaN or invalid interpolation
+            if np.isnan(r_curr):
+                continue
+
+            # Compute arc-length to next point
+            dx = xs[i + 1] - xs[i]
+            dy = ys[i + 1] - ys[i]
+            dz = zs[i + 1] - zs[i]
+            ds = np.sqrt(dx**2 + dy**2 + dz**2)
+
+            # Add to integral (using rate at current point, ds to next)
+            integral += r_curr * ds
+
+        return integral
