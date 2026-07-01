@@ -58,34 +58,22 @@ def test_bisection_of_antiparallel_fields_is_nan():
     assert np.all(np.isnan(dx)) and np.all(np.isnan(dy)) and np.all(np.isnan(dz))
 
 
-def test_candidate_uniform_field_vertical_line():
-    """Uniform +z field → vertical line at y=y_start."""
-    m = _FakeMap(bmsh=_uniform_field((0.0, 0.0, 1.0)),
-                 bmsp=_uniform_field((0.0, 0.0, 1.0)))
-    result = DominantXLine(m).candidate(z_seed=0.0)
-    # Seed at (X(0,0), 0, 0); trace in +z → curve lies on y≈0
-    assert result["y"].std() < 0.1  # y stays near 0
-    # Curve extends both directions in z from seed
-    assert np.min(result["z"]) < 0.0 and np.max(result["z"]) > 0.0
-
-
-def test_candidate_uniform_field_45deg_line():
-    """Uniform +(y+z)/√2 bisector → 45° line in (Y,Z)."""
-    m = _FakeMap(bmsh=_uniform_field((0.0, 1.0, 1.0)),
-                 bmsp=_uniform_field((0.0, 1.0, 1.0)))
-    result = DominantXLine(m).candidate(z_seed=0.0)
-    # Seed at (X(0,0), 0, 0); trace along +y and +z equally
-    ys, zs = result["y"], result["z"]
-    # Check (z - z_seed) ≈ (y - y_start) for the forward segment
-    forward_idx = zs > 0
-    assert np.allclose(zs[forward_idx], ys[forward_idx], atol=0.5)
-
-
-def test_candidate_dict_keys():
-    """candidate() returns a dict with keys x, y, z."""
+def test_candidate_on_uniform_field_is_a_meridian_parallel_line():
+    """Uniform +y field → curve runs along y (meridian-parallel), z stays at z_seed."""
     m = _FakeMap(bmsh=_uniform_field((0.0, 1.0, 0.0)),
                  bmsp=_uniform_field((0.0, 1.0, 0.0)))
-    result = DominantXLine(m).candidate(z_seed=2.0)
-    assert isinstance(result, dict)
-    assert set(result.keys()) == {"x", "y", "z"}
-    assert result["x"].shape == result["y"].shape == result["z"].shape
+    curve = DominantXLine(m).candidate(z_seed=0.0, step=0.1)
+    # z stays constant at z_seed=0
+    assert np.allclose(curve["z"], 0.0, atol=0.2)
+    # x is constant (flat surface)
+    assert np.allclose(curve["x"], curve["x"][0], atol=1e-6)
+    # y spans the grid (dawn→dusk, monotonically increasing)
+    assert np.all(np.diff(curve["y"]) > 0)
+
+
+def test_candidate_diagonal_field_is_a_straight_diagonal():
+    """Uniform b=(0,1,1) bisector → 45-degree line: curve["z"] == curve["y"]."""
+    m = _FakeMap(bmsh=_uniform_field((0.0, 1.0, 1.0)),
+                 bmsp=_uniform_field((0.0, 1.0, 1.0)))
+    curve = DominantXLine(m).candidate(z_seed=0.0, step=0.1)
+    assert np.allclose(curve["z"], curve["y"], atol=0.3)

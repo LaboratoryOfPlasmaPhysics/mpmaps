@@ -51,131 +51,156 @@ class DominantXLine:
         z_axis = self.mp.Z[:, 0]
         return y_axis, z_axis
 
-    def _interp(self):
-        """Build RegularGridInterpolator for X(Y, Z).
+    def _interp(self, field2d):
+        """Build RegularGridInterpolator for an arbitrary 2D field over (Y, Z).
 
-        Returns an interpolator object that evaluates X at arbitrary (Y, Z) points.
+        Args:
+            field2d: 2D array of shape (nz, ny) to interpolate.
+
+        Returns an interpolator object that evaluates field2d at arbitrary (Y, Z) points.
         """
         y_axis, z_axis = self._axes()
         return RegularGridInterpolator(
-            (z_axis, y_axis), self.mp.X,
+            (z_axis, y_axis), field2d,
             bounds_error=False, fill_value=np.nan
         )
 
-    def _inplane_dir(self, y, z):
+    def _inplane_dir(self, interps, y, z, prev):
         """Direction (dy, dz) in the (Y,Z) plane at position (y, z).
 
-        Interpolates the bisection field and projects to the (Y,Z) plane,
-        normalizing and enforcing sign continuity w.r.t. the previous step.
+        Args:
+            interps: pre-built (idy, idz) tuple of RegularGridInterpolators for the
+                     y- and z-components of the bisection field.
+            y: current Y coordinate.
+            z: current Z coordinate.
+            prev: previous (dy, dz) direction tuple, or None on first step.
 
-        Returns (dy, dz) unit vector in the plane.
+        Returns (dy, dz) unit vector in the plane, with sign continuity enforced
+        against prev (flip when dot with prev < 0).
         """
-        dx, dy, dz = self.bisection_field()
-        y_axis, z_axis = self._axes()
-
-        # Interpolate direction at (y, z)
-        dy_interp = RegularGridInterpolator(
-            (z_axis, y_axis), dy,
-            bounds_error=False, fill_value=np.nan
-        )
-        dz_interp = RegularGridInterpolator(
-            (z_axis, y_axis), dz,
-            bounds_error=False, fill_value=np.nan
-        )
-
-        dy_val = dy_interp([[z, y]])[0]
-        dz_val = dz_interp([[z, y]])[0]
+        idy, idz = interps
+        dy_val = idy([[z, y]])[0]
+        dz_val = idz([[z, y]])[0]
 
         # Normalize in the (Y,Z) plane
         norm = np.sqrt(dy_val**2 + dz_val**2)
         if norm < _EPS:
             return np.nan, np.nan
-        return dy_val / norm, dz_val / norm
+        dy_val /= norm
+        dz_val /= norm
 
-    def _trace(self, y_start, z_start, direction):
-        """Trace an integral curve in the (Y,Z) plane using Euler method.
+        # Sign continuity: flip if dot product with prev is negative
+        if prev is not None:
+            prev_dy, prev_dz = prev
+            if dy_val * prev_dy + dz_val * prev_dz < 0:
+                dy_val, dz_val = -dy_val, -dz_val
 
-        Starts at (y_start, z_start) and traces in the given direction
-        until hitting the domain boundary.
+        return dy_val, dz_val
+
+    def _trace(self, y0, z0, sign, interps, xi, step, max_steps, y_axis, z_axis):
+        """Trace an integral curve in (Y,Z) using the midpoint (RK2) scheme.
 
         Args:
-            y_start: initial Y coordinate
-            z_start: initial Z coordinate
-            direction: +1 (forward/dusk) or -1 (backward/dawn)
+            y0: initial Y coordinate.
+            z0: initial Z coordinate.
+            sign: +1 (forward) or -1 (backward) along the field direction.
+            interps: pre-built (idy, idz) tuple of interpolators for the bisection field.
+            xi: RegularGridInterpolator for X(Y, Z), used to lift the curve to 3D.
+            step: integration step size (Re).
+            max_steps: maximum number of integration steps.
+            y_axis: 1D array of Y grid values (for boundary check).
+            z_axis: 1D array of Z grid values (for boundary check).
 
         Returns:
-            (ys, zs) tuple of 1D arrays — ordered points on the curve.
+            list of (x, y, z) tuples — ordered points on the 3D integral curve.
         """
-        y_axis, z_axis = self._axes()
         y_min, y_max = y_axis.min(), y_axis.max()
         z_min, z_max = z_axis.min(), z_axis.max()
 
-        ys = [y_start]
-        zs = [z_start]
-        step_size = 0.2
+        y, z = y0, z0
+        prev = None
+        pts = []
 
-        y, z = y_start, z_start
-        prev_dy, prev_dz = None, None
+        # Compute x at seed
+        x = xi([[z, y]])[0]
+        pts.append((x, y, z))
 
-        for _ in range(500):  # Max iterations
-            dy, dz = self._inplane_dir(y, z)
-
-            if np.isnan(dy) or np.isnan(dz):
+        for _ in range(max_steps):
+            # --- RK2 midpoint scheme ---
+            # Half-step direction at current position
+            dy1, dz1 = self._inplane_dir(interps, y, z, prev)
+            if np.isnan(dy1) or np.isnan(dz1):
                 break
 
-            # Sign continuity: ensure consistent direction along the curve
-            if prev_dy is None:
-                # First step: no previous direction to compare to
-                # Just remember this direction for next iteration
-                pass
-            else:
-                # Subsequent steps: flip if dot product with prev is negative
-                if dy * prev_dy + dz * prev_dz < 0:
-                    dy, dz = -dy, -dz
+            # Apply sign on first step (seed direction)
+            if prev is None:
+                dy1, dz1 = sign * dy1, sign * dz1
 
-            # Euler step in the requested direction
-            # direction=+1 means trace forward along the field
-            # direction=-1 means trace backward against the field
-            y_new = y + step_size * direction * dy
-            z_new = z + step_size * direction * dz
+            # Midpoint
+            y_mid = y + 0.5 * step * dy1
+            z_mid = z + 0.5 * step * dz1
 
-            # Check boundary
+            # Direction at midpoint (use dy1/dz1 as prev to maintain sign)
+            dy2, dz2 = self._inplane_dir(interps, y_mid, z_mid, (dy1, dz1))
+            if np.isnan(dy2) or np.isnan(dz2):
+                break
+
+            # Full step using midpoint direction
+            y_new = y + step * dy2
+            z_new = z + step * dz2
+
+            # Boundary check
             if not (y_min <= y_new <= y_max and z_min <= z_new <= z_max):
                 break
 
+            # Lift to 3D
+            x_new = xi([[z_new, y_new]])[0]
+            if x_new < 1:
+                break
+
             y, z = y_new, z_new
-            ys.append(y)
-            zs.append(z)
-            prev_dy, prev_dz = dy, dz
+            prev = (dy2, dz2)
+            pts.append((x_new, y, z))
 
-        return np.array(ys), np.array(zs)
+        return pts
 
-    def candidate(self, z_seed):
+    def candidate(self, z_seed, step=0.1, max_steps=2000):
         """Integral curve of the bisection field on the noon meridian.
 
         Starts at the noon meridian (Y=0) at height Z=z_seed, traces
-        both dusk-ward (+Y) and dawn-ward (-Y), and lifts the result
-        to the 3D MP surface.
+        both dusk-ward (+1) and dawn-ward (-1), and returns the merged
+        3D curve ordered dawn→dusk.
 
         Args:
             z_seed: Z coordinate on the noon meridian (Re).
+            step: integration step size (Re), default 0.1.
+            max_steps: maximum integration steps per half-trace, default 2000.
 
         Returns:
-            dict {"x": x_array, "y": y_array, "z": z_array} — ordered 3D curve.
+            dict {"x": x_array, "y": y_array, "z": z_array} — ordered 3D curve,
+            dawn→dusk (increasing Y).
         """
-        # Get seed position on the noon meridian
-        x_interp = self._interp()
-        x_seed = x_interp([[z_seed, 0.0]])[0]
+        y_axis, z_axis = self._axes()
 
-        # Trace dusk-ward (+Y) and dawn-ward (-Y)
-        ys_dawn, zs_dawn = self._trace(0.0, z_seed, direction=-1)
-        ys_dusk, zs_dusk = self._trace(0.0, z_seed, direction=+1)
+        # Build (idy, idz) interpolators for the bisection field once
+        _, by, bz = self.bisection_field()
+        interps = (self._interp(by), self._interp(bz))
 
-        # Merge: reverse dawn so the curve is continuous
-        ys = np.concatenate([ys_dawn[::-1], ys_dusk[1:]])
-        zs = np.concatenate([zs_dawn[::-1], zs_dusk[1:]])
+        # Build X-surface interpolator once
+        xi = self._interp(self.mp.X)
 
-        # Lift to 3D surface
-        xs = np.array([x_interp([[z, y]])[0] for y, z in zip(ys, zs)])
+        # Trace forward (dusk, sign=+1) and backward (dawn, sign=-1)
+        pts_fwd = self._trace(0.0, z_seed, +1, interps, xi, step, max_steps,
+                              y_axis, z_axis)
+        pts_bwd = self._trace(0.0, z_seed, -1, interps, xi, step, max_steps,
+                              y_axis, z_axis)
+
+        # Merge: reverse backward trace (so it goes dawn→seed) + forward (seed→dusk)
+        # Skip duplicated seed point from fwd (pts_fwd[0] == pts_bwd[0] == seed)
+        pts = pts_bwd[::-1] + pts_fwd[1:]
+
+        xs = np.array([p[0] for p in pts])
+        ys = np.array([p[1] for p in pts])
+        zs = np.array([p[2] for p in pts])
 
         return {"x": xs, "y": ys, "z": zs}
