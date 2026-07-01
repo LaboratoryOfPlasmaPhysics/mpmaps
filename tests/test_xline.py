@@ -119,3 +119,20 @@ def test_xline_picks_seed_at_the_rate_peak():
     assert np.allclose(result["z"], result["z_seed"], atol=1e-6)
     assert result["J"] > 0.0
     assert len(result["R"]) == len(result["x"])
+
+
+def test_mpmap_has_dominant_xline_method():
+    from mpmaps import MPMap
+    assert callable(getattr(MPMap, "dominant_xline"))
+
+
+def test_dominant_xline_convenience_matches_class(monkeypatch):
+    # The _FakeMap already duck-types the reads DominantXLine needs; bind the
+    # MPMap.dominant_xline method to it and confirm it returns the class result.
+    from mpmaps import MPMap
+    ny = nz = 41
+    f = _uniform_field((0, 1, 0), ny=ny, nz=nz)
+    R = _R_peaked_at(3.0, ny=ny, nz=nz, extent=20.0)
+    m = _FakeMap(bmsh=f, bmsp=f, R=R, ny=ny, nz=nz, extent=20.0)
+    result = MPMap.dominant_xline(m, cusp_z=6.0, n_scan=25, step=0.25)
+    assert result["z_seed"] == pytest.approx(3.0, abs=0.5)

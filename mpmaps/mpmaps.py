@@ -3,6 +3,7 @@ import pandas as pd
 from scipy import constants as cst
 from scipy.optimize import root
 from .globals import grids
+from .xline import DominantXLine
 import os
 import matplotlib.pyplot as plt
 
@@ -267,6 +268,15 @@ Magnetopause thickness : {self._mp_thick}
         v = np.sqrt((b2 * n1 + b1 * n2) * (b1 + b2))
         R = k * u / v
         return R
+
+    def dominant_xline(self, cusp_z=6.0, n_scan=21, step=0.1):
+        """Dominant reconnection X-line for the current conditions.
+
+        Returns a dict with the ordered curve ``x``/``y``/``z`` on the MP,
+        the reconnection rate ``R`` along it, its integrated rate ``J`` and
+        the winning noon-meridian seed ``z_seed``. See mpmaps.xline.DominantXLine.
+        """
+        return DominantXLine(self).xline(cusp_z=cusp_z, n_scan=n_scan, step=step)
 
     def plot(self, **kwargs):
         """
