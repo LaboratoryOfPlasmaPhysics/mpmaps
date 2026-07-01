@@ -79,34 +79,22 @@ def test_candidate_diagonal_field_is_a_straight_diagonal():
     assert np.allclose(curve["z"], curve["y"], atol=0.3)
 
 
-def test_integrated_rate_of_constant_reconnection_on_unit_length_curve():
-    """Curve with constant R=1 everywhere → J equals arc length."""
-    m = _FakeMap(bmsh=_uniform_field((0.0, 1.0, 0.0)),
-                 bmsp=_uniform_field((0.0, 1.0, 0.0)),
-                 R=np.ones((5, 5)))
-    curve = DominantXLine(m).candidate(z_seed=0.0, step=0.1)
-    j = DominantXLine(m).integrated_rate(curve, cusp_z=6.0)
-    # Curve spans y from -22 to +22 (step=0.1 gives ~440 points) with constant z=0.
-    # Arc length ≈ 43.8 Re; with R=1, J ≈ 43.8
-    assert j > 40  # expected arc length ~43.8
-    assert j < 50  # sanity check
+def _straight_curve_along_y(zval, y0, y1, n):
+    y = np.linspace(y0, y1, n)
+    return {"x": np.full(n, 5.0), "y": y, "z": np.full(n, float(zval))}
+
+
+def test_integrated_rate_constant_R_equals_arclength():
+    # R == 1 everywhere; curve length from y=-4..4 at z=0 is 8.
+    m = _FakeMap(bmsh=_uniform_field((0, 1, 0)), bmsp=_uniform_field((0, 1, 0)))
+    curve = _straight_curve_along_y(zval=0.0, y0=-4.0, y1=4.0, n=81)
+    J = DominantXLine(m).integrated_rate(curve, cusp_z=6.0)
+    assert J == pytest.approx(8.0, rel=1e-6)
 
 
 def test_integrated_rate_clips_poleward_of_cusp():
-    """Curve crosses Z=±10; cusp_z=6 clips the poleward tails, reducing integral."""
-    y = np.linspace(-22, 22, 5)
-    z = np.linspace(-22, 22, 5)
-    Y, Z = np.meshgrid(y, z)
-    m = _FakeMap(bmsh=_uniform_field((0.0, 1.0, 0.0)),
-                 bmsp=_uniform_field((0.0, 1.0, 0.0)),
-                 R=np.ones((5, 5)))
-    xline = DominantXLine(m)
-    # Create a synthetic curve with points spanning Z from -15 to +15
-    curve = {
-        "x": np.array([5.0, 5.0, 5.0, 5.0, 5.0]),
-        "y": np.array([-10.0, -5.0, 0.0, 5.0, 10.0]),
-        "z": np.array([-15.0, -7.5, 0.0, 7.5, 15.0]),
-    }
-    j_no_clip = xline.integrated_rate(curve, cusp_z=100.0)  # full integral
-    j_clipped = xline.integrated_rate(curve, cusp_z=6.0)    # clipped at |Z|=6
-    assert j_clipped < j_no_clip  # clipping removes the poleward contributions
+    # Curve at z=10 (poleward of cusp_z=6) contributes nothing.
+    m = _FakeMap(bmsh=_uniform_field((0, 1, 0)), bmsp=_uniform_field((0, 1, 0)))
+    curve = _straight_curve_along_y(zval=10.0, y0=-4.0, y1=4.0, n=81)
+    J = DominantXLine(m).integrated_rate(curve, cusp_z=6.0)
+    assert J == pytest.approx(0.0, abs=1e-9)
