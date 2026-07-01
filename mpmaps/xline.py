@@ -46,7 +46,7 @@ class DominantXLine:
         """Extract (Y, Z) grid axes.
 
         Returns (y_axis, z_axis) tuple of 1D arrays from the 2D meshgrid.
-        Assumes Y is constant along columns (axis=0), Z is constant along rows (axis=1).
+        Y varies along columns (so Y[0, :] is the y-axis) and Z varies along rows (so Z[:, 0] is the z-axis).
         """
         y_axis = self.mp.Y[0, :]
         z_axis = self.mp.Z[:, 0]
@@ -156,7 +156,7 @@ class DominantXLine:
 
             # Lift to 3D
             x_new = xi([[z_new, y_new]])[0]
-            if x_new < 1:
+            if not np.isfinite(x_new) or x_new < 1.0:
                 break
 
             y, z = y_new, z_new

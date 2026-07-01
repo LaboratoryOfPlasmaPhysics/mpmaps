@@ -126,7 +126,7 @@ def test_mpmap_has_dominant_xline_method():
     assert callable(getattr(MPMap, "dominant_xline"))
 
 
-def test_dominant_xline_convenience_matches_class(monkeypatch):
+def test_dominant_xline_convenience_matches_class():
     # The _FakeMap already duck-types the reads DominantXLine needs; bind the
     # MPMap.dominant_xline method to it and confirm it returns the class result.
     from mpmaps import MPMap
@@ -136,3 +136,34 @@ def test_dominant_xline_convenience_matches_class(monkeypatch):
     m = _FakeMap(bmsh=f, bmsp=f, R=R, ny=ny, nz=nz, extent=20.0)
     result = MPMap.dominant_xline(m, cusp_z=6.0, n_scan=25, step=0.25)
     assert result["z_seed"] == pytest.approx(3.0, abs=0.5)
+
+
+def _rotational_field(ny, nz, extent):
+    # In-plane direction (-Z, Y): integral curves are circles about the origin.
+    y = np.linspace(-extent, extent, ny)
+    z = np.linspace(-extent, extent, nz)
+    Y, Z = np.meshgrid(y, z)
+    return (np.zeros_like(Y), -Z, Y)
+
+
+def test_candidate_on_rotational_field_traces_a_circle():
+    # Curved (rotating) bisector: the integral curve through (0, z_seed) is a
+    # circle of radius z_seed about the origin; sign-continuity must hold.
+    ny = nz = 81
+    f = _rotational_field(ny, nz, extent=20.0)
+    m = _FakeMap(bmsh=f, bmsp=f, ny=ny, nz=nz, extent=20.0)
+    curve = DominantXLine(m).candidate(z_seed=5.0, step=0.1, max_steps=200)
+    r = np.sqrt(curve["y"] ** 2 + curve["z"] ** 2)
+    assert np.allclose(r, 5.0, atol=0.1)
+
+
+def test_candidate_terminates_at_nan_dayside_boundary():
+    # A real Shue surface is NaN outside the dayside hull; the tracer must stop
+    # there and never return NaN x, rather than running to the grid edge.
+    ny = nz = 81
+    f = _uniform_field((0, 1, 0), ny=ny, nz=nz)
+    m = _FakeMap(bmsh=f, bmsp=f, ny=ny, nz=nz, extent=20.0)
+    m.X = np.where(m.Y ** 2 + m.Z ** 2 < 8.0 ** 2, 5.0, np.nan)
+    curve = DominantXLine(m).candidate(z_seed=0.0, step=0.1)
+    assert np.all(np.isfinite(curve["x"]))
+    assert np.abs(curve["y"]).max() < 8.5  # stopped near the NaN boundary, not the grid edge (20)
