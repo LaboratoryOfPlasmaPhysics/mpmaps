@@ -203,6 +203,37 @@ def test_candidate_on_rotational_field_traces_a_circle():
     assert np.allclose(r, 5.0, atol=0.1)
 
 
+def test_segment_reversal_guard_stops_at_the_turn():
+    # Rotational bisector (0, -Z, Y): the integral curve through (3, 0) is a
+    # circle of radius 3. Without a guard the trace wraps the full circle and z
+    # oscillates 0->3->0->-3->0. The reversal guard must stop each half-trace
+    # where z turns back, yielding the right-half arc: z monotone from -3 to +3
+    # with y staying >= 0 (no wrap into the left half).
+    ny = nz = 81
+    f = _rotational_field(ny, nz, extent=20.0)
+    m = _FakeMap(bmsh=f, bmsp=f, ny=ny, nz=nz, extent=20.0)
+    seg = DominantXLine(m).segment(3.0, 0.0, cusp=(-6.0, 6.0), step=0.1,
+                                   cusp_margin=0.0)
+    assert np.all(np.diff(seg["z"]) > -0.05)          # monotone increasing in z
+    assert seg["z"].max() == pytest.approx(3.0, abs=0.3)
+    assert seg["z"].min() == pytest.approx(-3.0, abs=0.3)
+    assert seg["y"].min() >= -0.5                      # right half only, no wrap
+    assert seg["y"].max() == pytest.approx(3.0, abs=0.3)
+
+
+def test_reversal_guard_does_not_arm_on_y_dominant_motion():
+    # Same rotational circle (radius 5) seeded at its TOP (0, 5): motion there
+    # is y-dominant with z already at its maximum and immediately decreasing. A
+    # naive z-extreme guard would truncate at the seed; the dz-dominance arming
+    # gate must NOT arm, so the curve extends well past the seed in y.
+    ny = nz = 81
+    f = _rotational_field(ny, nz, extent=20.0)
+    m = _FakeMap(bmsh=f, bmsp=f, ny=ny, nz=nz, extent=20.0)
+    seg = DominantXLine(m).segment(0.0, 5.0, cusp=(-8.0, 8.0), step=0.1,
+                                   cusp_margin=0.0)
+    assert np.abs(seg["y"]).max() > 3.0                # not truncated at the top
+
+
 def test_candidate_terminates_at_nan_dayside_boundary():
     # A real Shue surface is NaN outside the dayside hull; the tracer must stop
     # there and never return NaN x, rather than running to the grid edge.

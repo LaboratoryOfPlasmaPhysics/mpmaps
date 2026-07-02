@@ -12,6 +12,8 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import minimize_scalar
 
 _EPS = 1e-9
+_ARM_Z_MIN = 0.5   # Re — poleward z-travel from the seed before the guard arms
+_REV_TOL = 0.3     # Re — z retreat from the running extreme that trips the guard
 
 
 class DominantXLine:
@@ -139,6 +141,12 @@ class DominantXLine:
         prev = None
         pts = []
 
+        # Reversal-guard state (segment tracing only; see loop tail).
+        armed = False
+        pole_sign = 0.0
+        z_extreme = z0
+        extreme_idx = 0        # index into pts of the running z-extreme
+
         # Compute x at seed
         x = xi([[z, y]])[0]
         pts.append((x, y, z))
@@ -183,6 +191,32 @@ class DominantXLine:
             y, z = y_new, z_new
             prev = (dy2, dz2)
             pts.append((x_new, y, z))
+
+            # --- reversal guard (segment tracing only) ---
+            # Stop a poleward-moving half-trace once its z retreats from its
+            # running extreme — the near-cusp double-back that the small margin
+            # may not catch. Armed only when travel is z-dominant, so equator-
+            # family dawn-dusk runs (mainly in Y) are never truncated.
+            if z_band is not None:
+                dz_tot = z - z0
+                dy_tot = y - y0
+                if (not armed and abs(dz_tot) > _ARM_Z_MIN
+                        and abs(dz_tot) > abs(dy_tot)):
+                    armed = True
+                    pole_sign = 1.0 if dz_tot > 0 else -1.0
+                    z_extreme = z
+                    extreme_idx = len(pts) - 1
+                if armed:
+                    advancing = ((pole_sign > 0 and z > z_extreme)
+                                 or (pole_sign < 0 and z < z_extreme))
+                    retreating = ((pole_sign > 0 and z < z_extreme - _REV_TOL)
+                                  or (pole_sign < 0 and z > z_extreme + _REV_TOL))
+                    if advancing:
+                        z_extreme = z
+                        extreme_idx = len(pts) - 1
+                    elif retreating:
+                        pts = pts[:extreme_idx + 1]
+                        break
 
         return pts
 
