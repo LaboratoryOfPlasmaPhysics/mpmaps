@@ -447,9 +447,12 @@ def compute_sc_fieldline(params, y_seed, z_seed):
 def compute_xline(params):
     """Dominant X-line for the given parameters.
 
-    Returns a JSON-safe dict {x, y, z, R, J, z_seed}: the ordered 3D curve on
-    the magnetopause, the local reconnection rate along it (mV/m, NaN → None),
-    the integrated rate J (mV/m·Re) and the winning noon-meridian seed.
+    Returns a JSON-safe dict {x, y, z, R, J, seed, seed_family,
+    cusp_z_south, cusp_z_north}: the single best in-band traversal of the cusp
+    band (already clipped — no poleward prolongation), the local reconnection
+    rate along it (mV/m, NaN → None), the integrated rate J (mV/m·Re), the
+    winning seed [y, z] and its family ("noon" or "equator"), and the two cusp
+    latitudes (kept for labeling/reference).
     """
     p = dict(params)
     mp = _ensure_mp(p)
@@ -464,7 +467,10 @@ def compute_xline(params):
         "z": _tolist(res["z"]),
         "R": _tolist(res["R"]),
         "J": float(res["J"]),
-        "z_seed": float(res["z_seed"]),
+        "seed": [float(res["seed"][0]), float(res["seed"][1])],
+        "seed_family": str(res["seed_family"]),
+        "cusp_z_south": float(res["cusp_z_south"]),
+        "cusp_z_north": float(res["cusp_z_north"]),
     }
 
 

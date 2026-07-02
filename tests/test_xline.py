@@ -88,16 +88,58 @@ def test_integrated_rate_constant_R_equals_arclength():
     # R == 1 everywhere; curve length from y=-4..4 at z=0 is 8.
     m = _FakeMap(bmsh=_uniform_field((0, 1, 0)), bmsp=_uniform_field((0, 1, 0)))
     curve = _straight_curve_along_y(zval=0.0, y0=-4.0, y1=4.0, n=81)
-    J = DominantXLine(m).integrated_rate(curve, cusp_z=6.0)
+    J = DominantXLine(m).integrated_rate(curve, cusp=(-6.0, 6.0))
     assert J == pytest.approx(8.0, rel=1e-6)
 
 
 def test_integrated_rate_clips_poleward_of_cusp():
-    # Curve at z=10 (poleward of cusp_z=6) contributes nothing.
+    # Curve at z=10 (poleward of the north cusp at 6) contributes nothing.
     m = _FakeMap(bmsh=_uniform_field((0, 1, 0)), bmsp=_uniform_field((0, 1, 0)))
     curve = _straight_curve_along_y(zval=10.0, y0=-4.0, y1=4.0, n=81)
-    J = DominantXLine(m).integrated_rate(curve, cusp_z=6.0)
+    J = DominantXLine(m).integrated_rate(curve, cusp=(-6.0, 6.0))
     assert J == pytest.approx(0.0, abs=1e-9)
+
+
+def test_integrated_rate_uses_asymmetric_band():
+    # Band (-2, 8): a curve at z=5 is inside (counts), at z=-5 is outside (0).
+    m = _FakeMap(bmsh=_uniform_field((0, 1, 0)), bmsp=_uniform_field((0, 1, 0)))
+    inside = _straight_curve_along_y(zval=5.0, y0=-4.0, y1=4.0, n=81)
+    outside = _straight_curve_along_y(zval=-5.0, y0=-4.0, y1=4.0, n=81)
+    dxl = DominantXLine(m)
+    assert dxl.integrated_rate(inside, cusp=(-2.0, 8.0)) == pytest.approx(8.0, rel=1e-6)
+    assert dxl.integrated_rate(outside, cusp=(-2.0, 8.0)) == pytest.approx(0.0, abs=1e-9)
+
+
+def _bmsp_reversing_at(z_south, z_north, ny=41, nz=41, extent=22.0):
+    """A (bx,by,bz) tuple whose |B_msp| dips to ~0 at z_south and z_north.
+
+    bx=by=0; bz(z) has magnitude min at the two target latitudes (per hemisphere),
+    so cusp_latitudes() — which finds the dayside argmin of |B_msp| in each
+    hemisphere along Y=0 — recovers them.
+    """
+    z = np.linspace(-extent, extent, nz)
+    _, Z = np.meshgrid(np.linspace(-extent, extent, ny), z)
+    zeros = np.zeros_like(Z)
+    bz = np.where(Z >= 0, np.abs(Z - z_north), np.abs(Z - z_south))
+    return (zeros, zeros, bz)
+
+
+def test_cusp_latitudes_detects_bmsp_null():
+    # Symmetric reversal at ±8.
+    f = _uniform_field((0, 1, 0), ny=41, nz=41)
+    m = _FakeMap(bmsh=f, bmsp=_bmsp_reversing_at(-8.0, 8.0), ny=41, nz=41)
+    z_s, z_n = DominantXLine(m).cusp_latitudes()
+    assert z_n == pytest.approx(8.0, abs=1.2)   # within ~1 grid cell (extent 44/40)
+    assert z_s == pytest.approx(-8.0, abs=1.2)
+
+
+def test_cusp_latitudes_detects_asymmetric_null():
+    # Tilt-like asymmetry: north cusp at +5, south cusp at -10.
+    f = _uniform_field((0, 1, 0), ny=41, nz=41)
+    m = _FakeMap(bmsh=f, bmsp=_bmsp_reversing_at(-10.0, 5.0), ny=41, nz=41)
+    z_s, z_n = DominantXLine(m).cusp_latitudes()
+    assert z_n == pytest.approx(5.0, abs=1.2)
+    assert z_s == pytest.approx(-10.0, abs=1.2)
 
 
 def _R_peaked_at(zpeak, ny=41, nz=41, extent=20.0, width=2.0):
@@ -114,11 +156,15 @@ def test_xline_picks_seed_at_the_rate_peak():
     f = _uniform_field((0, 1, 0), ny=ny, nz=nz)
     R = _R_peaked_at(3.0, ny=ny, nz=nz, extent=20.0)
     m = _FakeMap(bmsh=f, bmsp=f, R=R, ny=ny, nz=nz, extent=20.0)
-    result = DominantXLine(m).xline(cusp_z=6.0, n_scan=25, step=0.25)
-    assert result["z_seed"] == pytest.approx(3.0, abs=0.5)
-    assert np.allclose(result["z"], result["z_seed"], atol=1e-6)
+    result = DominantXLine(m).xline(cusp=(-6.0, 6.0), n_scan=25, step=0.25)
+    assert result["seed_family"] == "noon"
+    assert result["seed"][1] == pytest.approx(3.0, abs=0.5)
+    assert np.allclose(result["z"], result["seed"][1], atol=1e-6)
     assert result["J"] > 0.0
     assert len(result["R"]) == len(result["x"])
+    # cusp bounds are echoed back for labeling/reference.
+    assert result["cusp_z_south"] == pytest.approx(-6.0)
+    assert result["cusp_z_north"] == pytest.approx(6.0)
 
 
 def test_mpmap_has_dominant_xline_method():
@@ -134,8 +180,8 @@ def test_dominant_xline_convenience_matches_class():
     f = _uniform_field((0, 1, 0), ny=ny, nz=nz)
     R = _R_peaked_at(3.0, ny=ny, nz=nz, extent=20.0)
     m = _FakeMap(bmsh=f, bmsp=f, R=R, ny=ny, nz=nz, extent=20.0)
-    result = MPMap.dominant_xline(m, cusp_z=6.0, n_scan=25, step=0.25)
-    assert result["z_seed"] == pytest.approx(3.0, abs=0.5)
+    result = MPMap.dominant_xline(m, cusp=(-6.0, 6.0), n_scan=25, step=0.25)
+    assert result["seed"][1] == pytest.approx(3.0, abs=0.5)
 
 
 def _rotational_field(ny, nz, extent):
@@ -167,3 +213,50 @@ def test_candidate_terminates_at_nan_dayside_boundary():
     curve = DominantXLine(m).candidate(z_seed=0.0, step=0.1)
     assert np.all(np.isfinite(curve["x"]))
     assert np.abs(curve["y"]).max() < 8.5  # stopped near the NaN boundary, not the grid edge (20)
+
+
+def test_segment_clips_at_cusp_band():
+    # Diagonal bisector b=(0,1,1) → the field line is z=y. With band (-3,3) the
+    # segment through the origin stops at |z|~3, not run to the grid edge (22).
+    ny = nz = 81
+    f = _uniform_field((0, 1, 1), ny=ny, nz=nz)
+    m = _FakeMap(bmsh=f, bmsp=f, ny=ny, nz=nz, extent=22.0)
+    seg = DominantXLine(m).segment(0.0, 0.0, cusp=(-3.0, 3.0), step=0.1)
+    assert seg["z"].max() <= 3.2
+    assert seg["z"].min() >= -3.2
+    # within the band it is the diagonal z==y
+    assert np.allclose(seg["z"], seg["y"], atol=0.3)
+
+
+def test_segment_off_meridian_seed_is_a_single_in_band_run():
+    # Vertical bisector (+z): field lines are constant-y verticals. A seed off
+    # the noon meridian (y0=10) yields one contiguous run clipped to the band.
+    ny = nz = 41
+    f = _uniform_field((0, 0, 1), ny=ny, nz=nz)
+    m = _FakeMap(bmsh=f, bmsp=f, ny=ny, nz=nz, extent=20.0)
+    seg = DominantXLine(m).segment(10.0, 0.0, cusp=(-6.0, 6.0), step=0.1)
+    assert np.allclose(seg["y"], 10.0, atol=1e-6)
+    assert seg["z"].max() <= 6.2 and seg["z"].min() >= -6.2
+    # contiguous: z increases monotonically along the ordered curve
+    assert np.all(np.diff(seg["z"]) > 0)
+
+
+def _R_peaked_in_y(ypeak, ny=41, nz=41, extent=20.0, width=2.0):
+    y = np.linspace(-extent, extent, ny)
+    z = np.linspace(-extent, extent, nz)
+    Y, Z = np.meshgrid(y, z)
+    return np.exp(-((Y - ypeak) ** 2) / (2 * width ** 2)) * np.ones_like(Z)
+
+
+def test_xline_equator_seeding_reaches_off_meridian_run():
+    # Vertical bisector (+z): field lines are constant-y verticals crossing the
+    # band. R peaks at dusk y=10 — a run that never crosses the noon meridian,
+    # so only equator (Z=0) seeding can reach it.
+    ny = nz = 41
+    f = _uniform_field((0, 0, 1), ny=ny, nz=nz)
+    R = _R_peaked_in_y(10.0, ny=ny, nz=nz, extent=20.0)
+    m = _FakeMap(bmsh=f, bmsp=f, R=R, ny=ny, nz=nz, extent=20.0)
+    res = DominantXLine(m).xline(cusp=(-6.0, 6.0), n_scan=25, step=0.25)
+    assert res["seed_family"] == "equator"
+    assert res["seed"][0] == pytest.approx(10.0, abs=0.7)
+    assert np.all((res["z"] >= -6.2) & (res["z"] <= 6.2))

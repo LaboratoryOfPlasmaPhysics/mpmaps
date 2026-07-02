@@ -31,13 +31,23 @@ async function init(wheelUrl) {
   status("loading numpy / scipy / pandas / matplotlib…");
   await pyodide.loadPackage(["numpy", "scipy", "pandas", "matplotlib", "micropip"]);
   status("installing spok and mpmaps…");
+  // Fetch the wheel ourselves with cache:'no-store' and install it from the
+  // Pyodide FS. Installing directly from the URL lets the browser HTTP-cache
+  // the wheel, so a rebuilt mpmaps at the same URL keeps getting served stale.
+  const whlResp = await fetch(wheelUrl, { cache: "no-store" });
+  if (!whlResp.ok) throw new Error("failed to fetch mpmaps wheel");
+  const whlBytes = new Uint8Array(await whlResp.arrayBuffer());
+  // Keep the real wheel filename on the FS — micropip parses name/version from
+  // it, so it must stay a valid wheel filename (name-version-pytag-...whl).
+  const whlName = wheelUrl.split("/").pop().split("?")[0];
+  pyodide.FS.writeFile("/tmp/" + whlName, whlBytes);
   await pyodide.runPythonAsync(`
 import micropip
 await micropip.install("spok")
-await micropip.install("${wheelUrl}")
+await micropip.install("emfs:/tmp/${whlName}")
   `);
   status("loading webapp Python…");
-  const resp = await fetch("pyodide_app.py");
+  const resp = await fetch("pyodide_app.py", { cache: "no-store" });
   if (!resp.ok) throw new Error("failed to fetch pyodide_app.py");
   const code = await resp.text();
   pyodide.FS.mkdirTree("/home/pyodide");

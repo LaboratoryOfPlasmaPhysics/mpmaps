@@ -271,21 +271,23 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
     hovertemplate: "%{text}<extra></extra>", showlegend: false,
   } : { type: "scatter3d", x: [], y: [], z: [], mode: "markers", showlegend: false, hoverinfo: "skip" };
 
-  const dxl3d = (dxlEnabled && dxlCurve) ? {
+  // The DXL is a single in-band traversal, already clipped to the cusp band,
+  // so it draws as one solid magenta curve — no poleward prolongation.
+  const dxlOn = dxlEnabled && dxlCurve;
+  const empty3dLine = { type: "scatter3d", x: [], y: [], z: [], mode: "lines", showlegend: false, hoverinfo: "skip" };
+  // ×1.01 radial offset floats the curve just off the surface (same trick as
+  // the Shue wireframe) instead of z-fighting with it.
+  const off = v => v == null ? null : v * 1.01;
+  const dxlHover = `dominant X line<br>R: %R% mV/m<br>J: ${dxlCurve ? dxlCurve.J.toFixed(2) : ""} mV/m·Rₑ`;
+  const dxl3dSolid = dxlOn ? {
     type: "scatter3d",
-    // ×1.01 radial offset floats the curve just off the surface (same trick
-    // as the Shue wireframe) instead of z-fighting with it.
-    x: dxlCurve.x.map(v => v == null ? null : v * 1.01),
-    y: dxlCurve.y.map(v => v == null ? null : v * 1.01),
-    z: dxlCurve.z.map(v => v == null ? null : v * 1.01),
+    x: dxlCurve.x.map(off), y: dxlCurve.y.map(off), z: dxlCurve.z.map(off),
     mode: "lines",
     line: { color: "#ff2fd6", width: 6 },
-    text: dxlCurve.R.map(r =>
-      `dominant X line<br>R: ${r != null ? r.toFixed(2) : "N/A"} mV/m` +
-      `<br>J: ${dxlCurve.J.toFixed(2)} mV/m·Rₑ`),
+    text: dxlCurve.R.map(r => dxlHover.replace("%R%", r != null ? r.toFixed(2) : "N/A")),
     hovertemplate: "%{text}<extra></extra>",
     showlegend: false,
-  } : { type: "scatter3d", x: [], y: [], z: [], mode: "lines", showlegend: false, hoverinfo: "skip" };
+  } : empty3dLine;
 
   // For light-theme exports, keep the outer paper transparent so the
   // snapshotPlot composite can layer the WebGL canvas pixels underneath
@@ -304,7 +306,7 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
-  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel, fl3d, scLine3d, dxl3d, scPt3d], layout,
+  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel, fl3d, scLine3d, dxl3dSolid, scPt3d], layout,
                { displaylogo: false, responsive: true });
 }
 
@@ -398,16 +400,18 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     hovertemplate: "%{text}<extra></extra>", showlegend: false,
   } : empty2d;
 
-  // White underlay beneath the magenta line keeps it readable on any
-  // colorscale region (the underlay disappears on light-theme exports,
-  // where the magenta alone has enough contrast).
-  const dxlUnder2d = (dxlEnabled && dxlCurve) ? {
+  // The DXL is a single in-band traversal already clipped to the cusp band, so
+  // it draws as one solid magenta curve. A white underlay keeps it readable on
+  // any colorscale region (the underlay drops out on light-theme exports, where
+  // the magenta alone has enough contrast).
+  const dxlOn2 = dxlEnabled && dxlCurve;
+  const dxlUnder2d = dxlOn2 ? {
     type: "scatter",
     x: dxlCurve.y, y: dxlCurve.z, mode: "lines",
     line: { color: "rgba(255,255,255,0.9)", width: 5.5 },
     showlegend: false, hoverinfo: "skip",
   } : empty2d;
-  const dxl2d = (dxlEnabled && dxlCurve) ? {
+  const dxl2d = dxlOn2 ? {
     type: "scatter",
     x: dxlCurve.y, y: dxlCurve.z, mode: "lines",
     line: { color: "#ff2fd6", width: 3 },
@@ -646,7 +650,7 @@ async function requestScLine(p, yz, key) {
 // the single worker while it runs, so it is opt-in, debounced behind a settle
 // delay, and computed asynchronously after the maps have rendered.
 let dxlEnabled = false;
-let dxlCurve = null;       // {x, y, z, R, J, z_seed} drawn on the plots, or null
+let dxlCurve = null;       // {x, y, z, R, J, seed, seed_family} drawn, or null
 let dxlTimer = null;       // settle timer before issuing a compute
 let dxlInFlight = false;   // one compute_xline at a time
 const DXL_SETTLE_MS = 1500;

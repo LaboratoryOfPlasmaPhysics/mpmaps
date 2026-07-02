@@ -288,14 +288,21 @@ Magnetopause thickness : {self._mp_thick}
         """
         return DrapedFieldLines(self).line_through(y0, z0, step=step)
 
-    def dominant_xline(self, cusp_z=6.0, n_scan=21, step=0.1):
+    def dominant_xline(self, cusp=None, n_scan=21, step=0.1):
         """Dominant reconnection X-line for the current conditions.
 
-        Returns a dict with the ordered curve ``x``/``y``/``z`` on the MP,
-        the reconnection rate ``R`` along it, its integrated rate ``J`` and
-        the winning noon-meridian seed ``z_seed``. See mpmaps.xline.DominantXLine.
+        The X-line is the single best in-band traversal of the cusp band — the
+        segment maximizing J = int R ds, scored independently (never summed
+        across a curve's multiple crossings). Returns a dict with the ordered
+        curve ``x``/``y``/``z`` on the MP (already clipped to the band), the
+        reconnection rate ``R`` along it, its integrated rate ``J``, the winning
+        seed ``seed = (y, z)`` and its family ``seed_family`` ("noon" or
+        "equator"), and the cusp latitudes ``cusp_z_south`` / ``cusp_z_north``
+        (detected from the ``|B_msp|`` null on the noon meridian; kept for
+        reference). Pass ``cusp=(z_south, z_north)`` to override the detection.
+        See mpmaps.xline.DominantXLine.
         """
-        return DominantXLine(self).xline(cusp_z=cusp_z, n_scan=n_scan, step=step)
+        return DominantXLine(self).xline(cusp=cusp, n_scan=n_scan, step=step)
 
     def plot(self, **kwargs):
         """

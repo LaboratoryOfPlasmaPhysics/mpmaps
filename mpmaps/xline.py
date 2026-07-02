@@ -19,6 +19,7 @@ class DominantXLine:
         self.mp = mpmap
         self._bisection = None
         self._rate_interp = None
+        self._cusp = None
 
     def bisection_field(self):
         """Unit line-field ``d ~ b_msh_hat + b_msp_hat`` on the (Y,Z) grid.
@@ -109,7 +110,8 @@ class DominantXLine:
 
         return dy_val, dz_val
 
-    def _trace(self, y0, z0, sign, interps, xi, step, max_steps, y_axis, z_axis):
+    def _trace(self, y0, z0, sign, interps, xi, step, max_steps, y_axis, z_axis,
+               z_band=None):
         """Trace an integral curve in (Y,Z) using the midpoint (RK2) scheme.
 
         Args:
@@ -122,6 +124,10 @@ class DominantXLine:
             max_steps: maximum number of integration steps.
             y_axis: 1D array of Y grid values (for boundary check).
             z_axis: 1D array of Z grid values (for boundary check).
+            z_band: optional ``(z_lo, z_hi)`` cusp band. When given, the trace
+                stops as soon as it steps outside it — so a segment ends at the
+                cusp latitude or the terminator, whichever comes first. The last
+                in-band sample is kept; the out-of-band point is not appended.
 
         Returns:
             list of (x, y, z) tuples — ordered points on the 3D integral curve.
@@ -165,6 +171,10 @@ class DominantXLine:
             if not (y_min <= y_new <= y_max and z_min <= z_new <= z_max):
                 break
 
+            # Cusp-band stop: end the segment at the cusp latitude.
+            if z_band is not None and (z_new < z_band[0] or z_new > z_band[1]):
+                break
+
             # Lift to 3D
             x_new = xi([[z_new, y_new]])[0]
             if not np.isfinite(x_new) or x_new < 1.0:
@@ -176,21 +186,17 @@ class DominantXLine:
 
         return pts
 
-    def candidate(self, z_seed, step=0.1, max_steps=2000):
-        """Integral curve of the bisection field on the noon meridian.
+    def _trace_segment(self, y0, z0, z_band, step, max_steps):
+        """Integral curve of the bisection field through seed (y0, z0).
 
-        Starts at the noon meridian (Y=0) at height Z=z_seed, traces
-        both dusk-ward (+1) and dawn-ward (-1), and returns the merged
-        3D curve ordered dawn→dusk.
-
-        Args:
-            z_seed: Z coordinate on the noon meridian (Re).
-            step: integration step size (Re), default 0.1.
-            max_steps: maximum integration steps per half-trace, default 2000.
+        Traces both directions from the seed and merges them into one ordered
+        3D curve. With ``z_band`` given, each half-trace stops at the cusp
+        latitude or the terminator (see ``_trace``), so the result is a single
+        contiguous in-band segment; with ``z_band=None`` it is the full field
+        line up to the terminator.
 
         Returns:
-            dict {"x": x_array, "y": y_array, "z": z_array} — ordered 3D curve,
-            dawn→dusk (increasing Y).
+            dict {"x": x_array, "y": y_array, "z": z_array} — ordered 3D curve.
         """
         y_axis, z_axis = self._axes()
 
@@ -201,13 +207,13 @@ class DominantXLine:
         # Build X-surface interpolator once
         xi = self._interp(self.mp.X)
 
-        # Trace forward (dusk, sign=+1) and backward (dawn, sign=-1)
-        pts_fwd = self._trace(0.0, z_seed, +1, interps, xi, step, max_steps,
-                              y_axis, z_axis)
-        pts_bwd = self._trace(0.0, z_seed, -1, interps, xi, step, max_steps,
-                              y_axis, z_axis)
+        # Trace forward (sign=+1) and backward (sign=-1) along the field line
+        pts_fwd = self._trace(y0, z0, +1, interps, xi, step, max_steps,
+                              y_axis, z_axis, z_band=z_band)
+        pts_bwd = self._trace(y0, z0, -1, interps, xi, step, max_steps,
+                              y_axis, z_axis, z_band=z_band)
 
-        # Merge: reverse backward trace (so it goes dawn→seed) + forward (seed→dusk)
+        # Merge: reverse backward trace (backward-end→seed) + forward (seed→...)
         # Skip duplicated seed point from fwd (pts_fwd[0] == pts_bwd[0] == seed)
         pts = pts_bwd[::-1] + pts_fwd[1:]
 
@@ -217,21 +223,96 @@ class DominantXLine:
 
         return {"x": xs, "y": ys, "z": zs}
 
-    def integrated_rate(self, curve, cusp_z=6.0):
+    def candidate(self, z_seed, step=0.1, max_steps=2000):
+        """Full bisection field line through the noon meridian (Y=0, Z=z_seed).
+
+        Traces both dusk-ward (+1) and dawn-ward (-1) up to the terminator and
+        returns the merged 3D curve ordered dawn→dusk. No cusp clipping.
+
+        Args:
+            z_seed: Z coordinate on the noon meridian (Re).
+            step: integration step size (Re), default 0.1.
+            max_steps: maximum integration steps per half-trace, default 2000.
+
+        Returns:
+            dict {"x": x_array, "y": y_array, "z": z_array} — ordered 3D curve,
+            dawn→dusk (increasing Y).
+        """
+        return self._trace_segment(0.0, z_seed, None, step, max_steps)
+
+    def segment(self, y0, z0, cusp, step=0.1, max_steps=2000):
+        """Single in-band bisection segment through seed (y0, z0).
+
+        Traces both directions from the seed, each clipped to the cusp band
+        ``cusp = (z_south, z_north)`` (or stopped at the terminator), and merges
+        them into one contiguous in-band curve. One seed → exactly one segment.
+
+        Args:
+            y0, z0: seed coordinates (Re); z0 must lie in the band.
+            cusp: ``(z_south, z_north)`` latitude band bounding the segment.
+            step: integration step size (Re), default 0.1.
+            max_steps: maximum integration steps per half-trace, default 2000.
+
+        Returns:
+            dict {"x": x_array, "y": y_array, "z": z_array} — ordered 3D curve.
+        """
+        return self._trace_segment(y0, z0, cusp, step, max_steps)
+
+    def cusp_latitudes(self):
+        """(z_south, z_north): the two cusp latitudes on the noon meridian (Y=0).
+
+        The cusp is the magnetospheric-field reversal, where ``|B_msp|``
+        collapses to its null. On the noon meridian this is exactly where the
+        high-shear (anti-parallel) band meets the low-shear (parallel) band. It
+        is detected per hemisphere as the dayside Z of minimum ``|B_msp|`` along
+        Y=0 — a clock-independent, robust marker. Dipole tilt makes the two
+        cusps asymmetric, so ``z_south`` and ``z_north`` are returned separately
+        (signed, ``z_south < 0 < z_north``). Cached for the instance lifetime.
+        """
+        if self._cusp is not None:
+            return self._cusp
+        y_axis, z_axis = self._axes()
+        j0 = int(np.argmin(np.abs(y_axis)))          # noon-meridian column
+        bx, by, bz = self.mp.bmsp
+        bmag = np.sqrt(bx[:, j0] ** 2 + by[:, j0] ** 2 + bz[:, j0] ** 2)
+        x = self.mp.X[:, j0]
+        dayside = np.isfinite(bmag) & np.isfinite(x) & (x >= 1.0)
+
+        def _cusp(hemisphere, fallback):
+            m = dayside & hemisphere
+            if not np.any(m):
+                return fallback
+            return float(z_axis[m][np.argmin(bmag[m])])
+
+        z_edge = z_axis[dayside]
+        z_hi = float(z_edge.max()) if z_edge.size else np.nan
+        z_lo = float(z_edge.min()) if z_edge.size else np.nan
+        z_north = _cusp(z_axis > 0, z_hi)
+        z_south = _cusp(z_axis < 0, z_lo)
+        self._cusp = (z_south, z_north)
+        return self._cusp
+
+    def integrated_rate(self, curve, cusp=None):
         """J = integral of the reconnection rate R along the curve, between cusps.
 
-        Only samples with ``|z| <= cusp_z`` contribute (placeholder cusp
-        boundary). ``ds`` is the 3D arc-length between consecutive samples;
-        a segment counts when its start sample is equatorward of the cusp.
+        Only samples within the cusp band ``z_south <= z <= z_north`` contribute
+        (any poleward remainder is ignored). Segments from ``segment()`` are
+        already band-clipped, so this in-band mask is then a no-op safety guard;
+        it still matters for arbitrary curves. ``cusp`` is a
+        ``(z_south, z_north)`` pair, or ``None`` to auto-detect it from the
+        ``|B_msp|`` null on the noon meridian (see ``cusp_latitudes``). ``ds`` is
+        the 3D arc-length between consecutive samples; a sub-segment counts when
+        its start sample is inside the band.
         """
         x, y, z = curve["x"], curve["y"], curve["z"]
         if len(x) < 2:
             return 0.0
+        z_s, z_n = self.cusp_latitudes() if cusp is None else cusp
         ri = self._rate_interpolator()
         R = ri(np.column_stack([z, y]))
         ds = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2 + np.diff(z) ** 2)
         Rmid = 0.5 * (R[:-1] + R[1:])
-        inside = np.abs(z[:-1]) <= cusp_z
+        inside = (z[:-1] >= z_s) & (z[:-1] <= z_n)
         valid = inside & np.isfinite(Rmid)
         return float(np.sum(Rmid[valid] * ds[valid]))
 
@@ -243,33 +324,97 @@ class DominantXLine:
         good = z_axis[np.isfinite(xvals) & (xvals >= 1.0)]
         return float(good.min()), float(good.max())
 
-    def _J_of_seed(self, z_seed, cusp_z, step):
-        return self.integrated_rate(self.candidate(z_seed, step=step), cusp_z=cusp_z)
+    def _seed_range_equator(self):
+        """(ymin, ymax) of the equator (Z=0) where the surface is dayside."""
+        y_axis = self.mp.Y[0, :]
+        xi = self._interp(self.mp.X)
+        xvals = xi(np.column_stack([np.zeros_like(y_axis), y_axis]))
+        good = y_axis[np.isfinite(xvals) & (xvals >= 1.0)]
+        return float(good.min()), float(good.max())
 
-    def xline(self, cusp_z=6.0, n_scan=21, step=0.1):
-        """Dominant X-line = argmax over noon-meridian seeds of J = int R ds.
+    def _segment_J(self, y0, z0, cusp, step):
+        """Per-segment J = int R ds of the in-band segment through (y0, z0)."""
+        return self.integrated_rate(self.segment(y0, z0, cusp, step=step),
+                                    cusp=cusp)
 
-        Coarse-scans ``n_scan`` seeds to bracket the peak, then refines with a
-        bounded golden-section search. Returns the winning curve, R along it,
-        its J and seed.
-        """
-        zmin, zmax = self._seed_range()
-        seeds = np.linspace(zmin, zmax, n_scan)
-        Js = np.array([self._J_of_seed(s, cusp_z, step) for s in seeds])
-        k = int(np.nanargmax(Js))
-        lo = seeds[max(k - 1, 0)]
-        hi = seeds[min(k + 1, n_scan - 1)]
-        if hi > lo:
-            opt = minimize_scalar(
-                lambda s: -self._J_of_seed(s, cusp_z, step),
-                bounds=(lo, hi), method="bounded",
-            )
-            z_best = float(opt.x)
-        else:
-            z_best = float(seeds[k])
-        curve = self.candidate(z_best, step=step)
+    def _pack(self, seg, seed, family, cusp):
+        """Assemble the xline() return dict for a winning segment."""
+        z_s, z_n = cusp
         ri = self._rate_interpolator()
-        R = ri(np.column_stack([curve["z"], curve["y"]]))
-        J = self.integrated_rate(curve, cusp_z=cusp_z)
-        return {"x": curve["x"], "y": curve["y"], "z": curve["z"],
-                "R": R, "J": J, "z_seed": z_best}
+        R = ri(np.column_stack([seg["z"], seg["y"]]))
+        J = self.integrated_rate(seg, cusp=cusp)
+        return {"x": seg["x"], "y": seg["y"], "z": seg["z"],
+                "R": R, "J": J,
+                "seed": (float(seed[0]), float(seed[1])),
+                "seed_family": family,
+                "cusp_z_south": z_s, "cusp_z_north": z_n}
+
+    def xline(self, cusp=None, n_scan=21, step=0.1):
+        """Dominant X-line = the single best in-band traversal of the band.
+
+        Each seed traces one contiguous segment clipped to the cusp band (or the
+        terminator). Seeds come from two families — the noon meridian (Y=0) and,
+        when the equator lies in-band, the equator (Z=0) — so dusk- and dawn-only
+        traversals that never cross Y=0 are still reached. The dominant X-line is
+        the segment with the largest per-segment J = int R ds across all seeds;
+        segments are scored independently, never summed.
+
+        ``cusp`` is a ``(z_south, z_north)`` pair bounding the band, or ``None``
+        to auto-detect the cusp latitudes from the ``|B_msp|`` null on the noon
+        meridian. Returns the winning segment, R along it, its J, the winning
+        seed ``(y, z)``, its family, and the detected cusp latitudes.
+        """
+        cusp = self.cusp_latitudes() if cusp is None else cusp
+        z_s, z_n = cusp
+
+        # --- noon-meridian family: seeds along Y=0 within the band ---
+        zmin, zmax = self._seed_range()
+        zmin, zmax = max(zmin, z_s), min(zmax, z_n)
+        noon_z = np.linspace(zmin, zmax, n_scan)
+        noon_J = np.array([self._segment_J(0.0, z, cusp, step) for z in noon_z])
+        families = [("noon", noon_z, noon_J)]
+
+        # --- equator family: seeds along Z=0, only if the equator is in-band ---
+        if z_s <= 0.0 <= z_n:
+            ymin, ymax = self._seed_range_equator()
+            eq_y = np.linspace(ymin, ymax, n_scan)
+            eq_J = np.array([self._segment_J(y, 0.0, cusp, step) for y in eq_y])
+            families.append(("equator", eq_y, eq_J))
+
+        # --- pick the family/seed with the largest per-segment J ---
+        best = None  # (J, family, params, k)
+        for name, params, Js in families:
+            if not np.any(np.isfinite(Js)):
+                continue
+            k = int(np.nanargmax(Js))
+            if best is None or Js[k] > best[0]:
+                best = (float(Js[k]), name, params, k)
+
+        if best is None:
+            # Degenerate map: nothing dayside/in-band. Fall back to band midpoint.
+            z_best = 0.5 * (z_s + z_n)
+            seg = self.segment(0.0, z_best, cusp, step=step)
+            return self._pack(seg, (0.0, z_best), "noon", cusp)
+
+        _, family, params, k = best
+
+        # --- bounded golden-section refine within the winning family ---
+        lo = params[max(k - 1, 0)]
+        hi = params[min(k + 1, len(params) - 1)]
+        if family == "noon":
+            def obj(p):
+                return -self._segment_J(0.0, p, cusp, step)
+            seed_of = lambda p: (0.0, p)
+        else:
+            def obj(p):
+                return -self._segment_J(p, 0.0, cusp, step)
+            seed_of = lambda p: (p, 0.0)
+        if hi > lo:
+            opt = minimize_scalar(obj, bounds=(lo, hi), method="bounded")
+            p_best = float(opt.x)
+        else:
+            p_best = float(params[k])
+
+        y_best, z_best = seed_of(p_best)
+        seg = self.segment(y_best, z_best, cusp, step=step)
+        return self._pack(seg, (y_best, z_best), family, cusp)
