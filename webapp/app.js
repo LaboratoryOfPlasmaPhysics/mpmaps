@@ -261,9 +261,9 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
     title: title ? { text: title, x: 0.5, xanchor: "center", font: { size: 14 } } : undefined,
     scene: {
       bgcolor: t.plot, aspectmode: "data",
-      xaxis: { title: "X (Rₑ)", color: t.axis, gridcolor: t.grid },
-      yaxis: { title: "Y (Rₑ)", color: t.axis, gridcolor: t.grid },
-      zaxis: { title: "Z (Rₑ)", color: t.axis, gridcolor: t.grid },
+      xaxis: { title: "X (Rₑ)", color: t.axis, gridcolor: t.grid, showspikes: false },
+      yaxis: { title: "Y (Rₑ)", color: t.axis, gridcolor: t.grid, showspikes: false },
+      zaxis: { title: "Z (Rₑ)", color: t.axis, gridcolor: t.grid, showspikes: false },
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
