@@ -18,6 +18,7 @@ class DominantXLine:
     def __init__(self, mpmap):
         self.mp = mpmap
         self._bisection = None
+        self._rate_interp = None
 
     def bisection_field(self):
         """Unit line-field ``d ~ b_msh_hat + b_msp_hat`` on the (Y,Z) grid.
@@ -65,6 +66,16 @@ class DominantXLine:
             (z_axis, y_axis), field2d,
             bounds_error=False, fill_value=np.nan
         )
+
+    def _rate_interpolator(self):
+        """Interpolator of the reconnection rate map, computed once.
+
+        Like ``bisection_field``, cached for the lifetime of this instance —
+        stale if the underlying MPMap parameters change afterwards.
+        """
+        if self._rate_interp is None:
+            self._rate_interp = self._interp(self.mp.reconnection_rate())
+        return self._rate_interp
 
     def _inplane_dir(self, interps, y, z, prev):
         """Direction (dy, dz) in the (Y,Z) plane at position (y, z).
@@ -216,7 +227,7 @@ class DominantXLine:
         x, y, z = curve["x"], curve["y"], curve["z"]
         if len(x) < 2:
             return 0.0
-        ri = self._interp(self.mp.reconnection_rate())
+        ri = self._rate_interpolator()
         R = ri(np.column_stack([z, y]))
         ds = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2 + np.diff(z) ** 2)
         Rmid = 0.5 * (R[:-1] + R[1:])
@@ -257,7 +268,7 @@ class DominantXLine:
         else:
             z_best = float(seeds[k])
         curve = self.candidate(z_best, step=step)
-        ri = self._interp(self.mp.reconnection_rate())
+        ri = self._rate_interpolator()
         R = ri(np.column_stack([curve["z"], curve["y"]]))
         J = self.integrated_rate(curve, cusp_z=cusp_z)
         return {"x": curve["x"], "y": curve["y"], "z": curve["z"],
