@@ -234,6 +234,22 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
     hovertemplate: "%{text}<extra></extra>", showlegend: false,
   } : empty3d;
 
+  const dxl3d = (dxlEnabled && dxlCurve) ? {
+    type: "scatter3d",
+    // ×1.01 radial offset floats the curve just off the surface (same trick
+    // as the Shue wireframe) instead of z-fighting with it.
+    x: dxlCurve.x.map(v => v == null ? null : v * 1.01),
+    y: dxlCurve.y.map(v => v == null ? null : v * 1.01),
+    z: dxlCurve.z.map(v => v == null ? null : v * 1.01),
+    mode: "lines",
+    line: { color: "#ff2fd6", width: 6 },
+    text: dxlCurve.R.map(r =>
+      `dominant X line<br>R: ${r != null ? r.toFixed(2) : "N/A"} mV/m` +
+      `<br>J: ${dxlCurve.J.toFixed(2)} mV/m·Rₑ`),
+    hovertemplate: "%{text}<extra></extra>",
+    showlegend: false,
+  } : { type: "scatter3d", x: [], y: [], z: [], mode: "lines", showlegend: false, hoverinfo: "skip" };
+
   // For light-theme exports, keep the outer paper transparent so the
   // snapshotPlot composite can layer the WebGL canvas pixels underneath
   // the html-to-image overlay. The WebGL scene background uses t.plot,
@@ -251,7 +267,7 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
-  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel], layout,
+  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel, dxl3d], layout,
                { displaylogo: false, responsive: true });
 }
 
@@ -314,6 +330,26 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     hovertemplate: "%{text}<extra></extra>", showlegend: false,
   } : empty2d;
 
+  // White underlay beneath the magenta line keeps it readable on any
+  // colorscale region (the underlay disappears on light-theme exports,
+  // where the magenta alone has enough contrast).
+  const dxlUnder2d = (dxlEnabled && dxlCurve) ? {
+    type: "scatter",
+    x: dxlCurve.y, y: dxlCurve.z, mode: "lines",
+    line: { color: "rgba(255,255,255,0.9)", width: 5.5 },
+    showlegend: false, hoverinfo: "skip",
+  } : empty2d;
+  const dxl2d = (dxlEnabled && dxlCurve) ? {
+    type: "scatter",
+    x: dxlCurve.y, y: dxlCurve.z, mode: "lines",
+    line: { color: "#ff2fd6", width: 3 },
+    text: dxlCurve.R.map(r =>
+      `dominant X line<br>R: ${r != null ? r.toFixed(2) : "N/A"} mV/m` +
+      `<br>J: ${dxlCurve.J.toFixed(2)} mV/m·Rₑ`),
+    hovertemplate: "%{text}<extra></extra>",
+    showlegend: false,
+  } : empty2d;
+
   const layout = {
     paper_bgcolor: t.paper, plot_bgcolor: t.plot,
     font: { color: t.font },
@@ -330,7 +366,7 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     },
     annotations: [imfArrowAnnotation2D(clockDeg, bimf)],
   };
-  Plotly.react("plot-2d", [heatmap, boundary, orb2d, cxOthers2, cxSel2], layout,
+  Plotly.react("plot-2d", [heatmap, boundary, orb2d, cxOthers2, cxSel2, dxlUnder2d, dxl2d], layout,
                { displaylogo: false, responsive: true });
 }
 
@@ -365,6 +401,46 @@ let selectedCrossing = 0;   // index into perCrossingOmni / crossings arrays
 // 40 entries ≈ 120 MB of browser memory, well within budget.
 const COMPUTE_CACHE_SIZE = 40;
 const computeCache = new Map();   // insertion-ordered → use for LRU
+
+// ---------- dominant X-line overlay ----------
+// The DXL is much slower than a map compute (~10-20 s in Pyodide) and blocks
+// the single worker while it runs, so it is opt-in, debounced behind a settle
+// delay, and computed asynchronously after the maps have rendered.
+let dxlEnabled = false;
+let dxlCurve = null;       // {x, y, z, R, J, z_seed} drawn on the plots, or null
+let dxlTimer = null;       // settle timer before issuing a compute
+let dxlInFlight = false;   // one compute_xline at a time
+const DXL_SETTLE_MS = 1500;
+
+// Separate LRU: the DXL depends only on the field parameters — quantity, Pd
+// and boundary mode don't enter — so quantity switches redraw it instantly
+// and the computeCache.clear() calls never invalidate it.
+const DXL_CACHE_SIZE = 40;
+const dxlCache = new Map();
+
+function dxlKey(p) {
+  return `${p.clock}|${p.cone}|${p.tilt}|${p.bimf}|${p.nsw}`;
+}
+
+function dxlCacheGet(key) {
+  if (!dxlCache.has(key)) return null;
+  const val = dxlCache.get(key);
+  dxlCache.delete(key);
+  dxlCache.set(key, val);
+  return val;
+}
+
+function dxlCachePut(key, val) {
+  if (dxlCache.size >= DXL_CACHE_SIZE) {
+    const oldest = dxlCache.keys().next().value;
+    dxlCache.delete(oldest);
+  }
+  dxlCache.set(key, val);
+}
+
+function setDxlStatus(msg) {
+  document.getElementById("dxl-status").textContent = msg;
+}
 
 function readBoundaryParams() {
   const mode = document.querySelector('input[name="mp-mode"]:checked').value;
@@ -458,6 +534,11 @@ async function recompute() {
         cachePut(key, data);
       }
 
+      // Sync the X-line overlay to the new params before rendering: cache
+      // hits draw in the same pass, misses clear the curve and arm the
+      // settle timer (the slow compute is issued only once sliders rest).
+      syncDxl(p);
+
       let t0 = tick();
       render3D(data, p.quantity, p.clock, p.cone, p.bimf);
       if (prof) prof.render_3d = tick() - t0;
@@ -491,11 +572,7 @@ async function recompute() {
         console.groupEnd();
       }
 
-      const tag = fromCache ? " · cached" : "";
-      setStatus(
-        `${p.quantity} · clock=${p.clock}° cone=${p.cone}° tilt=${p.tilt}°${tag}`,
-        "ready"
-      );
+      readyStatus(p, fromCache ? " · cached" : "");
       p = pendingParams;
     } while (p);
   } catch (err) {
@@ -504,6 +581,85 @@ async function recompute() {
   } finally {
     busy = false;
   }
+}
+
+function readyStatus(p, tag = "") {
+  setStatus(
+    `${p.quantity} · clock=${p.clock}° cone=${p.cone}° tilt=${p.tilt}°${tag}`,
+    "ready"
+  );
+}
+
+function rerenderPlots() {
+  if (!lastRender) return;
+  const { data, quantity, clock, cone, bimf } = lastRender;
+  render3D(data, quantity, clock, cone, bimf);
+  render2D(data, quantity, clock, bimf);
+}
+
+// Sync dxlCurve to params p: cache hit → curve ready to draw; miss → curve
+// cleared and a compute armed behind the settle delay. Does NOT render —
+// recompute() calls this just before its own render pass; other callers
+// (checkbox, stale re-issue) follow up with rerenderPlots().
+function syncDxl(p, delayMs = DXL_SETTLE_MS) {
+  clearTimeout(dxlTimer);
+  if (!dxlEnabled) { dxlCurve = null; return; }
+  const key = dxlKey(p);
+  const cached = dxlCacheGet(key);
+  if (cached) {
+    dxlCurve = cached;
+    setDxlStatus(`J = ${cached.J.toFixed(2)} mV/m·Rₑ`);
+    return;
+  }
+  dxlCurve = null;
+  setDxlStatus("waiting…");
+  dxlTimer = setTimeout(() => requestDxl(p, key), delayMs);
+}
+
+async function requestDxl(p, key) {
+  if (dxlInFlight) return;  // in-flight completion re-syncs to the latest params
+  dxlInFlight = true;
+  setDxlStatus("computing X line…");
+  let data = null;
+  try {
+    // On a computeCache hit no worker message was sent, so the worker's
+    // loaded slices can lag the on-screen cone/tilt — make them match.
+    await ensureSlicesFor(`${p.cone}`, `${p.tilt}`);
+    data = await call({ type: "compute_xline", params: p });
+    dxlCachePut(key, data);
+  } catch (err) {
+    console.error(err);
+    setDxlStatus(`error: ${err.message || err}`);
+  } finally {
+    dxlInFlight = false;
+  }
+  // ensureSlicesFor may have raised the busy overlay; restore the ready bar
+  // unless a map recompute is running (it sets its own status).
+  if (!busy) readyStatus(readParams());
+  if (!dxlEnabled) return;
+  const cur = dxlKey(readParams());
+  if (data && cur === key) {
+    dxlCurve = data;
+    setDxlStatus(`J = ${data.J.toFixed(2)} mV/m·Rₑ`);
+    rerenderPlots();
+  } else if (cur !== key) {
+    // Parameters moved on while we were computing — go again for the latest.
+    syncDxl(readParams(), 0);
+  }
+}
+
+function wireDxl() {
+  document.getElementById("dxl-toggle").addEventListener("change", (e) => {
+    dxlEnabled = e.target.checked;
+    if (dxlEnabled) {
+      syncDxl(readParams(), 0);
+    } else {
+      clearTimeout(dxlTimer);
+      dxlCurve = null;
+      setDxlStatus("");
+    }
+    rerenderPlots();
+  });
 }
 
 // ---------- export ----------
@@ -1040,6 +1196,7 @@ function wireSliders() {
     wireSliders();
     wireExport();
     wireCrossingsPanel();
+    wireDxl();
     setStatus("initializing worker…");
     await call({ type: "init", wheelUrl: WHEEL_URL });
     setStatus("fetching magnetopause coordinates…");

@@ -9,6 +9,7 @@
 //                                   omni_bx_json, omni_by_json, omni_density_json,
 //                                                                       requestId}
 //   in:  {type: 'compute',          params,                             requestId}
+//   in:  {type: 'compute_xline',    params,                             requestId}
 //   out: {type: 'status', msg}
 //   out: {type: 'ack'   | 'result' | 'error', requestId, ...}
 
@@ -111,6 +112,18 @@ pyodide_app.set_slices(
         data._timings.worker_python_call = tPy1 - tPy0;
         data._timings.worker_proxy_to_js = tPy2 - tPy1;
       }
+      result(msg.requestId, data);
+
+    } else if (msg.type === "compute_xline") {
+      pyodide.globals.set("_xline_params", pyodide.toPy(msg.params));
+      const proxy = await pyodide.runPythonAsync(
+        `pyodide_app.compute_xline(_xline_params)`
+      );
+      const data = proxy.toJs({
+        dict_converter: Object.fromEntries,
+        depth: -1,
+      });
+      proxy.destroy();
       result(msg.requestId, data);
 
     } else {

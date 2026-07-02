@@ -6,6 +6,7 @@ JS calls these entry points:
 - set_slices(cone_key, tilt_key, ...) — when cone or tilt changes
 - set_trajectory(sc_id, ...)          — when spacecraft / date range changes
 - compute_and_render(params)          — every parameter change
+- compute_xline(params)               — dominant X-line overlay (slow, async)
 
 The MPMap object is rebuilt only when slices change (cheap then-on),
 and the requested quantity is computed and returned along with geometry
@@ -359,19 +360,13 @@ def _find_crossings(mp, scalars_2d, boundary, params):
     }
 
 
-def compute_and_render(params):
-    """
-    Compute the requested quantity and return a dict ready for Plotly:
-      - X, Y, Z : 2D arrays for the 3D surface
-      - scalars : 2D array of the quantity (same shape)
-      - y_axis, z_axis : 1D axis values for the 2D heatmap
-      - wireframe : list of line segments for the Shue wireframe
-      - mp_boundary_y, mp_boundary_z : terminator boundary for 2D overlay
-    """
-    p = dict(params)
-    timings = {}
+def _ensure_mp(p):
+    """Return the cached MPMap synced to params p (build cold, or apply delta).
 
-    t0 = time.perf_counter()
+    Every entry point that needs an MPMap must go through here: on a JS
+    compute-cache hit no worker message is sent, so the cached instance can
+    lag the on-screen parameters by several changes.
+    """
     mp = _state.get("mp")
     last = _state.get("mp_last") or {}
 
@@ -403,6 +398,47 @@ def compute_and_render(params):
         "bimf": p["bimf"],
         "nsw": p["nsw"],
     }
+    return mp
+
+
+def compute_xline(params):
+    """Dominant X-line for the given parameters.
+
+    Returns a JSON-safe dict {x, y, z, R, J, z_seed}: the ordered 3D curve on
+    the magnetopause, the local reconnection rate along it (mV/m, NaN → None),
+    the integrated rate J (mV/m·Re) and the winning noon-meridian seed.
+    """
+    p = dict(params)
+    mp = _ensure_mp(p)
+    res = mp.dominant_xline()
+
+    def _tolist(a):
+        return [None if not np.isfinite(v) else float(v) for v in a]
+
+    return {
+        "x": _tolist(res["x"]),
+        "y": _tolist(res["y"]),
+        "z": _tolist(res["z"]),
+        "R": _tolist(res["R"]),
+        "J": float(res["J"]),
+        "z_seed": float(res["z_seed"]),
+    }
+
+
+def compute_and_render(params):
+    """
+    Compute the requested quantity and return a dict ready for Plotly:
+      - X, Y, Z : 2D arrays for the 3D surface
+      - scalars : 2D array of the quantity (same shape)
+      - y_axis, z_axis : 1D axis values for the 2D heatmap
+      - wireframe : list of line segments for the Shue wireframe
+      - mp_boundary_y, mp_boundary_z : terminator boundary for 2D overlay
+    """
+    p = dict(params)
+    timings = {}
+
+    t0 = time.perf_counter()
+    mp = _ensure_mp(p)
     timings["py_build_mp"] = (time.perf_counter() - t0) * 1000
 
     quantity = p["quantity"]
