@@ -401,6 +401,25 @@ def _ensure_mp(p):
     return mp
 
 
+def compute_fieldlines(params):
+    """Draped magnetosheath field lines for the given parameters.
+
+    Returns {"lines": [{x, y, z}, ...]}, NaN → None, float32.
+    Depends only on clock and cone (bimf scales direction-unchanged; nsw/tilt
+    don't touch bmsh), so the JS caller caches on clock|cone only.
+    """
+    p = dict(params)
+    mp = _ensure_mp(p)
+    raw = mp.draped_field_lines()
+
+    def _tolist(a):
+        return [None if not np.isfinite(v) else float(v) for v in a.astype(np.float32)]
+
+    lines = [{"x": _tolist(seg["x"]), "y": _tolist(seg["y"]), "z": _tolist(seg["z"])}
+             for seg in raw]
+    return {"lines": lines}
+
+
 def compute_xline(params):
     """Dominant X-line for the given parameters.
 

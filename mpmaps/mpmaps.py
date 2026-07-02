@@ -4,6 +4,7 @@ from scipy import constants as cst
 from scipy.optimize import root
 from .globals import grids
 from .xline import DominantXLine
+from .fieldlines import DrapedFieldLines
 import os
 import matplotlib.pyplot as plt
 
@@ -268,6 +269,16 @@ Magnetopause thickness : {self._mp_thick}
         v = np.sqrt((b2 * n1 + b1 * n2) * (b1 + b2))
         R = k * u / v
         return R
+
+    def draped_field_lines(self, seed_spacing=2.5, min_sep=2.0, step=0.1):
+        """Draped magnetosheath field lines on the magnetopause.
+
+        Returns a list of dicts with keys ``x``/``y``/``z`` — one per line.
+        See mpmaps.fieldlines.DrapedFieldLines.
+        """
+        return DrapedFieldLines(self).lines(
+            seed_spacing=seed_spacing, min_sep=min_sep, step=step
+        )
 
     def dominant_xline(self, cusp_z=6.0, n_scan=21, step=0.1):
         """Dominant reconnection X-line for the current conditions.

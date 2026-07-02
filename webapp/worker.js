@@ -126,6 +126,18 @@ pyodide_app.set_slices(
       proxy.destroy();
       result(msg.requestId, data);
 
+    } else if (msg.type === "compute_fieldlines") {
+      pyodide.globals.set("_fl_params", pyodide.toPy(msg.params));
+      const proxy = await pyodide.runPythonAsync(
+        `pyodide_app.compute_fieldlines(_fl_params)`
+      );
+      const data = proxy.toJs({
+        dict_converter: Object.fromEntries,
+        depth: -1,
+      });
+      proxy.destroy();
+      result(msg.requestId, data);
+
     } else {
       throw new Error(`unknown message type: ${msg.type}`);
     }

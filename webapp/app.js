@@ -234,6 +234,24 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
     hovertemplate: "%{text}<extra></extra>", showlegend: false,
   } : empty3d;
 
+  // Build a single scatter3d trace for all field lines using null separators.
+  const fl3d = (() => {
+    if (!flEnabled || !flLines || flLines.length === 0)
+      return { type: "scatter3d", x: [], y: [], z: [], mode: "lines", showlegend: false, hoverinfo: "skip" };
+    const fx = [], fy = [], fz = [];
+    for (const seg of flLines) {
+      if (fx.length) { fx.push(null); fy.push(null); fz.push(null); }
+      for (let i = 0; i < seg.x.length; i++) {
+        fx.push(seg.x[i] == null ? null : seg.x[i] * 1.01);
+        fy.push(seg.y[i] == null ? null : seg.y[i] * 1.01);
+        fz.push(seg.z[i] == null ? null : seg.z[i] * 1.01);
+      }
+    }
+    return { type: "scatter3d", x: fx, y: fy, z: fz, mode: "lines",
+             line: { color: "rgba(255,255,255,0.65)", width: 1 },
+             showlegend: false, hoverinfo: "skip" };
+  })();
+
   const dxl3d = (dxlEnabled && dxlCurve) ? {
     type: "scatter3d",
     // ×1.01 radial offset floats the curve just off the surface (same trick
@@ -267,7 +285,7 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
-  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel, dxl3d], layout,
+  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel, fl3d, dxl3d], layout,
                { displaylogo: false, responsive: true });
 }
 
@@ -330,6 +348,23 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     hovertemplate: "%{text}<extra></extra>", showlegend: false,
   } : empty2d;
 
+  // Field-line overlay: one trace, null-separated curves.
+  const fl2d = (() => {
+    if (!flEnabled || !flLines || flLines.length === 0)
+      return { type: "scatter", x: [], y: [], mode: "lines", showlegend: false, hoverinfo: "skip" };
+    const fx = [], fy = [];
+    for (const seg of flLines) {
+      if (fx.length) { fx.push(null); fy.push(null); }
+      for (let i = 0; i < seg.y.length; i++) {
+        fx.push(seg.y[i]);
+        fy.push(seg.z[i]);
+      }
+    }
+    return { type: "scatter", x: fx, y: fy, mode: "lines",
+             line: { color: "rgba(255,255,255,0.65)", width: 1 },
+             showlegend: false, hoverinfo: "skip" };
+  })();
+
   // White underlay beneath the magenta line keeps it readable on any
   // colorscale region (the underlay disappears on light-theme exports,
   // where the magenta alone has enough contrast).
@@ -366,7 +401,7 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     },
     annotations: [imfArrowAnnotation2D(clockDeg, bimf)],
   };
-  Plotly.react("plot-2d", [heatmap, boundary, orb2d, cxOthers2, cxSel2, dxlUnder2d, dxl2d], layout,
+  Plotly.react("plot-2d", [heatmap, boundary, orb2d, cxOthers2, cxSel2, fl2d, dxlUnder2d, dxl2d], layout,
                { displaylogo: false, responsive: true });
 }
 
@@ -401,6 +436,88 @@ let selectedCrossing = 0;   // index into perCrossingOmni / crossings arrays
 // 40 entries ≈ 120 MB of browser memory, well within budget.
 const COMPUTE_CACHE_SIZE = 40;
 const computeCache = new Map();   // insertion-ordered → use for LRU
+
+// ---------- draped msh field lines overlay ----------
+// Async, opt-in, settle-delayed — mirrors the DXL machinery.
+// Cache key is clock|cone only (bimf just scales magnitude, nsw/tilt untouched).
+let flEnabled = false;
+let flLines = null;      // [{x,y,z}, …] or null
+let flTimer = null;
+let flInFlight = false;
+const FL_SETTLE_MS = 1500;
+const FL_CACHE_SIZE = 40;
+const flCache = new Map();
+
+function flKey(p) { return `${p.clock}|${p.cone}`; }
+
+function flCacheGet(key) {
+  if (!flCache.has(key)) return null;
+  const val = flCache.get(key);
+  flCache.delete(key);
+  flCache.set(key, val);
+  return val;
+}
+
+function flCachePut(key, val) {
+  if (flCache.size >= FL_CACHE_SIZE) flCache.delete(flCache.keys().next().value);
+  flCache.set(key, val);
+}
+
+function setFlStatus(msg) {
+  document.getElementById("fl-status").textContent = msg;
+}
+
+function syncFl(p, delayMs = FL_SETTLE_MS) {
+  clearTimeout(flTimer);
+  if (!flEnabled) { flLines = null; return; }
+  const key = flKey(p);
+  const cached = flCacheGet(key);
+  if (cached) { flLines = cached; setFlStatus(`${cached.length} lines`); return; }
+  flLines = null;
+  setFlStatus("waiting…");
+  flTimer = setTimeout(() => requestFl(p, key), delayMs);
+}
+
+async function requestFl(p, key) {
+  if (flInFlight) return;
+  flInFlight = true;
+  setFlStatus("computing field lines…");
+  let data = null;
+  try {
+    await ensureSlicesFor(`${p.cone}`, `${p.tilt}`);
+    data = await call({ type: "compute_fieldlines", params: p });
+    flCachePut(key, data.lines);
+  } catch (err) {
+    console.error(err);
+    setFlStatus(`error: ${err.message || err}`);
+  } finally {
+    flInFlight = false;
+  }
+  if (!busy) readyStatus(readParams());
+  if (!flEnabled) return;
+  const cur = flKey(readParams());
+  if (data && cur === key) {
+    flLines = data.lines;
+    setFlStatus(`${data.lines.length} lines`);
+    rerenderPlots();
+  } else if (cur !== key) {
+    syncFl(readParams(), 0);
+  }
+}
+
+function wireFieldLines() {
+  document.getElementById("fl-toggle").addEventListener("change", (e) => {
+    flEnabled = e.target.checked;
+    if (flEnabled) {
+      syncFl(readParams(), 0);
+    } else {
+      clearTimeout(flTimer);
+      flLines = null;
+      setFlStatus("");
+    }
+    rerenderPlots();
+  });
+}
 
 // ---------- dominant X-line overlay ----------
 // The DXL is much slower than a map compute (~10-20 s in Pyodide) and blocks
@@ -534,10 +651,9 @@ async function recompute() {
         cachePut(key, data);
       }
 
-      // Sync the X-line overlay to the new params before rendering: cache
-      // hits draw in the same pass, misses clear the curve and arm the
-      // settle timer (the slow compute is issued only once sliders rest).
+      // Sync overlays to new params before rendering.
       syncDxl(p);
+      syncFl(p);
 
       let t0 = tick();
       render3D(data, p.quantity, p.clock, p.cone, p.bimf);
@@ -1197,6 +1313,7 @@ function wireSliders() {
     wireExport();
     wireCrossingsPanel();
     wireDxl();
+    wireFieldLines();
     setStatus("initializing worker…");
     await call({ type: "init", wheelUrl: WHEEL_URL });
     setStatus("fetching magnetopause coordinates…");
