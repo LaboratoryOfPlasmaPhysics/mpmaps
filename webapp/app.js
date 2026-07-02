@@ -248,7 +248,7 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
       }
     }
     return { type: "scatter3d", x: fx, y: fy, z: fz, mode: "lines",
-             line: { color: "rgba(255,255,255,0.65)", width: 1 },
+             line: { color: "rgba(20,20,20,0.9)", width: 2 },
              showlegend: false, hoverinfo: "skip" };
   })();
 
@@ -361,7 +361,7 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
       }
     }
     return { type: "scatter", x: fx, y: fy, mode: "lines",
-             line: { color: "rgba(255,255,255,0.65)", width: 1 },
+             line: { color: "rgba(20,20,20,0.9)", width: 2 },
              showlegend: false, hoverinfo: "skip" };
   })();
 
