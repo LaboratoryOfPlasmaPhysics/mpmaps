@@ -288,7 +288,7 @@ Magnetopause thickness : {self._mp_thick}
         """
         return DrapedFieldLines(self).line_through(y0, z0, step=step)
 
-    def dominant_xline(self, cusp=None, n_scan=21, step=0.1):
+    def dominant_xline(self, cusp=None, n_scan=21, step=0.1, cusp_margin=0.2):
         """Dominant reconnection X-line for the current conditions.
 
         The X-line is the single best in-band traversal of the cusp band — the
@@ -302,7 +302,8 @@ Magnetopause thickness : {self._mp_thick}
         reference). Pass ``cusp=(z_south, z_north)`` to override the detection.
         See mpmaps.xline.DominantXLine.
         """
-        return DominantXLine(self).xline(cusp=cusp, n_scan=n_scan, step=step)
+        return DominantXLine(self).xline(cusp=cusp, n_scan=n_scan, step=step,
+                                         cusp_margin=cusp_margin)
 
     def plot(self, **kwargs):
         """

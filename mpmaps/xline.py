@@ -240,23 +240,34 @@ class DominantXLine:
         """
         return self._trace_segment(0.0, z_seed, None, step, max_steps)
 
-    def segment(self, y0, z0, cusp, step=0.1, max_steps=2000):
+    def segment(self, y0, z0, cusp, step=0.1, max_steps=2000, cusp_margin=0.2):
         """Single in-band bisection segment through seed (y0, z0).
 
         Traces both directions from the seed, each clipped to the cusp band
         ``cusp = (z_south, z_north)`` (or stopped at the terminator), and merges
         them into one contiguous in-band curve. One seed → exactly one segment.
 
+        ``cusp_margin`` (Re) is a security zone: tracing stops that far short of
+        each cusp, keeping the curve out of the near-null region where the
+        bisection field rotates rapidly and integral curves double back. The
+        physical ``cusp`` band is preserved for scoring — only tracing/seeding
+        uses the shrunk band.
+
         Args:
             y0, z0: seed coordinates (Re); z0 must lie in the band.
             cusp: ``(z_south, z_north)`` latitude band bounding the segment.
             step: integration step size (Re), default 0.1.
             max_steps: maximum integration steps per half-trace, default 2000.
+            cusp_margin: security-zone half-width (Re) subtracted from each
+                cusp latitude before tracing, default 0.2.
 
         Returns:
             dict {"x": x_array, "y": y_array, "z": z_array} — ordered 3D curve.
         """
-        return self._trace_segment(y0, z0, cusp, step, max_steps)
+        z_s, z_n = cusp
+        m = min(cusp_margin, 0.49 * (z_n - z_s))   # keep the trace band non-empty
+        trace_band = (z_s + m, z_n - m)
+        return self._trace_segment(y0, z0, trace_band, step, max_steps)
 
     def cusp_latitudes(self):
         """(z_south, z_north): the two cusp latitudes on the noon meridian (Y=0).
@@ -332,10 +343,11 @@ class DominantXLine:
         good = y_axis[np.isfinite(xvals) & (xvals >= 1.0)]
         return float(good.min()), float(good.max())
 
-    def _segment_J(self, y0, z0, cusp, step):
+    def _segment_J(self, y0, z0, cusp, step, cusp_margin):
         """Per-segment J = int R ds of the in-band segment through (y0, z0)."""
-        return self.integrated_rate(self.segment(y0, z0, cusp, step=step),
-                                    cusp=cusp)
+        return self.integrated_rate(
+            self.segment(y0, z0, cusp, step=step, cusp_margin=cusp_margin),
+            cusp=cusp)
 
     def _pack(self, seg, seed, family, cusp):
         """Assemble the xline() return dict for a winning segment."""
@@ -349,7 +361,7 @@ class DominantXLine:
                 "seed_family": family,
                 "cusp_z_south": z_s, "cusp_z_north": z_n}
 
-    def xline(self, cusp=None, n_scan=21, step=0.1):
+    def xline(self, cusp=None, n_scan=21, step=0.1, cusp_margin=0.2):
         """Dominant X-line = the single best in-band traversal of the band.
 
         Each seed traces one contiguous segment clipped to the cusp band (or the
@@ -366,19 +378,22 @@ class DominantXLine:
         """
         cusp = self.cusp_latitudes() if cusp is None else cusp
         z_s, z_n = cusp
+        m = min(cusp_margin, 0.49 * (z_n - z_s))
 
-        # --- noon-meridian family: seeds along Y=0 within the band ---
+        # --- noon-meridian family: seeds along Y=0 within the shrunk band ---
         zmin, zmax = self._seed_range()
-        zmin, zmax = max(zmin, z_s), min(zmax, z_n)
+        zmin, zmax = max(zmin, z_s + m), min(zmax, z_n - m)
         noon_z = np.linspace(zmin, zmax, n_scan)
-        noon_J = np.array([self._segment_J(0.0, z, cusp, step) for z in noon_z])
+        noon_J = np.array([self._segment_J(0.0, z, cusp, step, cusp_margin)
+                           for z in noon_z])
         families = [("noon", noon_z, noon_J)]
 
         # --- equator family: seeds along Z=0, only if the equator is in-band ---
         if z_s <= 0.0 <= z_n:
             ymin, ymax = self._seed_range_equator()
             eq_y = np.linspace(ymin, ymax, n_scan)
-            eq_J = np.array([self._segment_J(y, 0.0, cusp, step) for y in eq_y])
+            eq_J = np.array([self._segment_J(y, 0.0, cusp, step, cusp_margin)
+                             for y in eq_y])
             families.append(("equator", eq_y, eq_J))
 
         # --- pick the family/seed with the largest per-segment J ---
@@ -393,7 +408,8 @@ class DominantXLine:
         if best is None:
             # Degenerate map: nothing dayside/in-band. Fall back to band midpoint.
             z_best = 0.5 * (z_s + z_n)
-            seg = self.segment(0.0, z_best, cusp, step=step)
+            seg = self.segment(0.0, z_best, cusp, step=step,
+                               cusp_margin=cusp_margin)
             return self._pack(seg, (0.0, z_best), "noon", cusp)
 
         _, family, params, k = best
@@ -403,11 +419,11 @@ class DominantXLine:
         hi = params[min(k + 1, len(params) - 1)]
         if family == "noon":
             def obj(p):
-                return -self._segment_J(0.0, p, cusp, step)
+                return -self._segment_J(0.0, p, cusp, step, cusp_margin)
             seed_of = lambda p: (0.0, p)
         else:
             def obj(p):
-                return -self._segment_J(p, 0.0, cusp, step)
+                return -self._segment_J(p, 0.0, cusp, step, cusp_margin)
             seed_of = lambda p: (p, 0.0)
         if hi > lo:
             opt = minimize_scalar(obj, bounds=(lo, hi), method="bounded")
@@ -416,5 +432,6 @@ class DominantXLine:
             p_best = float(params[k])
 
         y_best, z_best = seed_of(p_best)
-        seg = self.segment(y_best, z_best, cusp, step=step)
+        seg = self.segment(y_best, z_best, cusp, step=step,
+                           cusp_margin=cusp_margin)
         return self._pack(seg, (y_best, z_best), family, cusp)

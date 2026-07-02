@@ -228,6 +228,19 @@ def test_segment_clips_at_cusp_band():
     assert np.allclose(seg["z"], seg["y"], atol=0.3)
 
 
+def test_segment_margin_stops_short_of_the_cusp():
+    # Vertical (+z) bisector: field lines are constant-y verticals. With band
+    # (-6, 6) the segment reaches |z|~6; with cusp_margin=1.0 it must stop a
+    # full Re short, at |z|~5, on both hemispheres.
+    ny = nz = 81
+    f = _uniform_field((0, 0, 1), ny=ny, nz=nz)
+    m = _FakeMap(bmsh=f, bmsp=f, ny=ny, nz=nz, extent=20.0)
+    seg = DominantXLine(m).segment(0.0, 0.0, cusp=(-6.0, 6.0), step=0.1,
+                                   cusp_margin=1.0)
+    assert seg["z"].max() == pytest.approx(5.0, abs=0.2)
+    assert seg["z"].min() == pytest.approx(-5.0, abs=0.2)
+
+
 def test_segment_off_meridian_seed_is_a_single_in_band_run():
     # Vertical bisector (+z): field lines are constant-y verticals. A seed off
     # the noon meridian (y0=10) yields one contiguous run clipped to the band.
