@@ -138,6 +138,20 @@ pyodide_app.set_slices(
       proxy.destroy();
       result(msg.requestId, data);
 
+    } else if (msg.type === "compute_sc_fieldline") {
+      pyodide.globals.set("_scfl_params", pyodide.toPy(msg.params));
+      pyodide.globals.set("_scfl_y", msg.y_seed);
+      pyodide.globals.set("_scfl_z", msg.z_seed);
+      const proxy = await pyodide.runPythonAsync(
+        `pyodide_app.compute_sc_fieldline(_scfl_params, _scfl_y, _scfl_z)`
+      );
+      const data = proxy ? proxy.toJs({
+        dict_converter: Object.fromEntries,
+        depth: -1,
+      }) : null;
+      if (proxy) proxy.destroy();
+      result(msg.requestId, data);
+
     } else {
       throw new Error(`unknown message type: ${msg.type}`);
     }

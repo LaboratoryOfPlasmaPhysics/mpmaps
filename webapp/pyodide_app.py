@@ -420,6 +420,30 @@ def compute_fieldlines(params):
     return {"lines": lines}
 
 
+def compute_sc_fieldline(params, y_seed, z_seed):
+    """Single draped msh field line through the spacecraft crossing (y, z).
+
+    Returns {"x","y","z","seed_index"} (NaN → None, float32) or None when the
+    seed is off the dayside surface. Same field dependence as compute_fieldlines
+    (clock and cone only) plus the seed position.
+    """
+    p = dict(params)
+    mp = _ensure_mp(p)
+    seg = mp.field_line_through(float(y_seed), float(z_seed))
+    if seg is None:
+        return None
+
+    def _tolist(a):
+        return [None if not np.isfinite(v) else float(v) for v in a.astype(np.float32)]
+
+    return {
+        "x": _tolist(seg["x"]),
+        "y": _tolist(seg["y"]),
+        "z": _tolist(seg["z"]),
+        "seed_index": int(seg["seed_index"]),
+    }
+
+
 def compute_xline(params):
     """Dominant X-line for the given parameters.
 

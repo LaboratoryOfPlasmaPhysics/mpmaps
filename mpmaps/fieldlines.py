@@ -70,6 +70,33 @@ class DrapedFieldLines:
             pts.append((x_new, y, z))
         return pts
 
+    def line_through(self, y0, z0, step=0.1, max_steps=2000):
+        """Single draped field line through the seed point (y0, z0).
+
+        Traces forward + backward from the seed and merges into one ordered
+        3D curve. Returns a dict {"x","y","z","seed_index"} where seed_index
+        is the vertex index of the seed in the merged curve, or None when the
+        seed is not on the dayside surface.
+        """
+        _, by, bz = self.mp.bmsh
+        idy = self._interp(by)
+        idz = self._interp(bz)
+        xi  = self._interp(self.mp.X)
+        y_axis, z_axis = self._axes()
+
+        fwd = self._trace(y0, z0, +1, idy, idz, xi, step, max_steps, y_axis, z_axis)
+        bwd = self._trace(y0, z0, -1, idy, idz, xi, step, max_steps, y_axis, z_axis)
+        if len(bwd) == 0:  # seed off the dayside surface
+            return None
+        pts = bwd[::-1] + fwd[1:]
+        seed_index = len(bwd) - 1
+        return {
+            "x": np.array([p[0] for p in pts]),
+            "y": np.array([p[1] for p in pts]),
+            "z": np.array([p[2] for p in pts]),
+            "seed_index": seed_index,
+        }
+
     def _occupancy_cell(self, y, z, cell_size, y_min, z_min):
         return (int((y - y_min) / cell_size), int((z - z_min) / cell_size))
 

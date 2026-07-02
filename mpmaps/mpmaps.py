@@ -280,6 +280,14 @@ Magnetopause thickness : {self._mp_thick}
             seed_spacing=seed_spacing, min_sep=min_sep, step=step
         )
 
+    def field_line_through(self, y0, z0, step=0.1):
+        """Single draped msh field line through the seed point (y0, z0).
+
+        Returns {"x","y","z","seed_index"} or None if off the dayside.
+        See mpmaps.fieldlines.DrapedFieldLines.line_through.
+        """
+        return DrapedFieldLines(self).line_through(y0, z0, step=step)
+
     def dominant_xline(self, cusp_z=6.0, n_scan=21, step=0.1):
         """Dominant reconnection X-line for the current conditions.
 

@@ -58,6 +58,34 @@ def test_line_count_bounded():
     assert 1 <= len(result) <= 60  # generous upper bound; typical ~15-25
 
 
+def test_line_through_passes_through_seed():
+    # +Y field -> horizontal line at constant Z through the seed.
+    m = _FakeMap(bmsh=_uniform_field((0.0, 1.0, 0.0)))
+    seg = DrapedFieldLines(m).line_through(3.0, 4.0, step=0.5)
+    i = seg["seed_index"]
+    assert seg["y"][i] == pytest.approx(3.0, abs=1e-9)
+    assert seg["z"][i] == pytest.approx(4.0, abs=1e-9)
+
+
+def test_line_through_seed_index_in_range():
+    m = _FakeMap(bmsh=_curved_field())
+    seg = DrapedFieldLines(m).line_through(-2.0, 5.0, step=0.5)
+    assert 0 <= seg["seed_index"] < len(seg["x"])
+    assert len(seg["x"]) == len(seg["y"]) == len(seg["z"])
+
+
+def test_line_through_on_dayside_surface():
+    m = _FakeMap(bmsh=_curved_field(), xval=5.0)
+    seg = DrapedFieldLines(m).line_through(0.0, 0.0, step=0.5)
+    assert all(x >= 1.0 for x in seg["x"])
+
+
+def test_line_through_off_dayside_returns_none():
+    # X everywhere < 1 -> seed is not on the dayside -> no line.
+    m = _FakeMap(bmsh=_curved_field(), xval=0.0)
+    assert DrapedFieldLines(m).line_through(0.0, 0.0, step=0.5) is None
+
+
 def test_bimf_scale_does_not_change_lines():
     """Field lines depend only on direction — bimf scaling must not shift them."""
     bx1, by1, bz1 = _curved_field()

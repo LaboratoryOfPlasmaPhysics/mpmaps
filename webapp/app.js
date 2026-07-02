@@ -1,6 +1,8 @@
 // mpmaps interactive webapp — main thread.
 // Pyodide lives in worker.js so heavy compute never freezes the UI.
 
+import { scDxlIntersection } from "./geometry.js";
+
 const SLICES_BASE = "./slices";  // override via window.MPMAPS_SLICES_BASE
 const WHEEL_URL   = new URL("mpmaps-0.2.0-py3-none-any.whl", window.location.href).href;
 
@@ -252,6 +254,23 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
              showlegend: false, hoverinfo: "skip" };
   })();
 
+  // Spacecraft field line (cyan) + its intersection with the DXL (marker).
+  const scLine3d = scLine ? {
+    type: "scatter3d",
+    x: scLine.x.map(v => v == null ? null : v * 1.01),
+    y: scLine.y.map(v => v == null ? null : v * 1.01),
+    z: scLine.z.map(v => v == null ? null : v * 1.01),
+    mode: "lines", line: { color: "#22d3ee", width: 3 },
+    showlegend: false, hoverinfo: "skip",
+  } : { type: "scatter3d", x: [], y: [], z: [], mode: "lines", showlegend: false, hoverinfo: "skip" };
+  const scPt3d = scDxlPoint ? {
+    type: "scatter3d",
+    x: [scDxlPoint.x * 1.01], y: [scDxlPoint.y * 1.01], z: [scDxlPoint.z * 1.01],
+    mode: "markers", marker: { size: 6, symbol: "x", color: "#ffffff" },
+    text: [`SC→DXL crossing<br>${scDxlPoint.dist_re.toFixed(2)} Rₑ`],
+    hovertemplate: "%{text}<extra></extra>", showlegend: false,
+  } : { type: "scatter3d", x: [], y: [], z: [], mode: "markers", showlegend: false, hoverinfo: "skip" };
+
   const dxl3d = (dxlEnabled && dxlCurve) ? {
     type: "scatter3d",
     // ×1.01 radial offset floats the curve just off the surface (same trick
@@ -285,7 +304,7 @@ function render3D(result, quantity, clockDeg, coneDeg, bimf, themeName = "dark",
       camera: { eye: { x: 1.8, y: 1.0, z: 0.4 } },
     },
   };
-  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel, fl3d, dxl3d], layout,
+  Plotly.react("plot-3d", [surface, ...wireTraces, shaft, head, orb3d, cxOthers, cxSel, fl3d, scLine3d, dxl3d, scPt3d], layout,
                { displaylogo: false, responsive: true });
 }
 
@@ -365,6 +384,20 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
              showlegend: false, hoverinfo: "skip" };
   })();
 
+  // Spacecraft field line (cyan) + its intersection with the DXL (star).
+  const scLine2d = scLine ? {
+    type: "scatter", x: scLine.y, y: scLine.z, mode: "lines",
+    line: { color: "#22d3ee", width: 3 },
+    showlegend: false, hoverinfo: "skip",
+  } : empty2d;
+  const scPt2d = scDxlPoint ? {
+    type: "scatter", x: [scDxlPoint.y], y: [scDxlPoint.z], mode: "markers",
+    marker: { size: 14, symbol: "star", color: "#ffffff", line: { color: "#000", width: 1.5 } },
+    text: [`SC→DXL crossing<br>${scDxlPoint.dist_re.toFixed(2)} Rₑ ` +
+           `(${Math.round(scDxlPoint.dist_km).toLocaleString()} km)`],
+    hovertemplate: "%{text}<extra></extra>", showlegend: false,
+  } : empty2d;
+
   // White underlay beneath the magenta line keeps it readable on any
   // colorscale region (the underlay disappears on light-theme exports,
   // where the magenta alone has enough contrast).
@@ -401,7 +434,7 @@ function render2D(result, quantity, clockDeg, bimf, themeName = "dark", title = 
     },
     annotations: [imfArrowAnnotation2D(clockDeg, bimf)],
   };
-  Plotly.react("plot-2d", [heatmap, boundary, orb2d, cxOthers2, cxSel2, fl2d, dxlUnder2d, dxl2d], layout,
+  Plotly.react("plot-2d", [heatmap, boundary, orb2d, cxOthers2, cxSel2, fl2d, scLine2d, dxlUnder2d, dxl2d, scPt2d], layout,
                { displaylogo: false, responsive: true });
 }
 
@@ -517,6 +550,95 @@ function wireFieldLines() {
     }
     rerenderPlots();
   });
+}
+
+// ---------- spacecraft field line + DXL intersection ----------
+// Auto-shown whenever a crossing is displayed (independent of the field-lines
+// checkbox). A dedicated line is traced through the selected crossing so it
+// passes exactly through the spacecraft. The intersection with the DXL and the
+// along-line distance appear when the DXL is also on. Trace is cheap (one line).
+let scLine = null;        // {x,y,z,seed_index} through the selected crossing, or null
+let scDxlPoint = null;    // {y,z,x,dist_re,dist_km} intersection with the DXL, or null
+let scTimer = null;
+let scInFlight = false;
+const SC_SETTLE_MS = 800;
+const SC_CACHE_SIZE = 40;
+const scCache = new Map();
+
+function scKey(p, y, z) {
+  return `${p.clock}|${p.cone}|${y.toFixed(1)}|${z.toFixed(1)}`;
+}
+function scCacheGet(key) {
+  if (!scCache.has(key)) return null;
+  const v = scCache.get(key); scCache.delete(key); scCache.set(key, v); return v;
+}
+function scCachePut(key, val) {
+  if (scCache.size >= SC_CACHE_SIZE) scCache.delete(scCache.keys().next().value);
+  scCache.set(key, val);
+}
+function setScDxlStatus(msg) {
+  const el = document.getElementById("sc-dxl-status");
+  if (el) el.textContent = msg;
+}
+
+// (Y,Z) of the currently selected crossing, from a crossings payload, or null.
+function crossingYZFrom(crossings) {
+  if (!crossings || !crossings.Y || crossings.Y.length === 0) return null;
+  const si = selectedCrossing;
+  if (si == null || si < 0 || si >= crossings.Y.length) return null;
+  return { y: crossings.Y[si], z: crossings.Z[si] };
+}
+
+// Recompute the SC↔DXL intersection + distance from the current scLine and
+// dxlCurve. Cheap pure geometry — call just before every render pass.
+function refreshScDxl() {
+  scDxlPoint = (scLine && dxlEnabled && dxlCurve)
+    ? scDxlIntersection(scLine, dxlCurve)
+    : null;
+  if (scDxlPoint) {
+    setScDxlStatus(
+      `SC→DXL: ${scDxlPoint.dist_re.toFixed(2)} Rₑ ` +
+      `(${Math.round(scDxlPoint.dist_km).toLocaleString()} km)`
+    );
+  } else {
+    setScDxlStatus("");
+  }
+}
+
+// Sync the SC field line to the selected crossing: cache hit draws now, miss
+// arms a short settle timer then traces. No crossing → clear everything.
+function syncScLine(p, crossings) {
+  clearTimeout(scTimer);
+  const yz = crossingYZFrom(crossings);
+  if (!yz) { scLine = null; scDxlPoint = null; setScDxlStatus(""); return; }
+  const key = scKey(p, yz.y, yz.z);
+  const cached = scCacheGet(key);
+  if (cached) { scLine = cached; refreshScDxl(); return; }
+  scLine = null;
+  scTimer = setTimeout(() => requestScLine(p, yz, key), SC_SETTLE_MS);
+}
+
+async function requestScLine(p, yz, key) {
+  if (scInFlight) return;
+  scInFlight = true;
+  let data = null;
+  try {
+    await ensureSlicesFor(`${p.cone}`, `${p.tilt}`);
+    data = await call({ type: "compute_sc_fieldline", params: p, y_seed: yz.y, z_seed: yz.z });
+    if (data) scCachePut(key, data);
+  } catch (err) {
+    console.error(err);
+  } finally {
+    scInFlight = false;
+  }
+  if (!busy) readyStatus(readParams());
+  // Apply only if the crossing/params haven't moved on since we started.
+  const cur = crossingYZFrom(lastRender?.data?.crossings);
+  if (data && cur && scKey(readParams(), cur.y, cur.z) === key) {
+    scLine = data;
+    refreshScDxl();
+    rerenderPlots();
+  }
 }
 
 // ---------- dominant X-line overlay ----------
@@ -654,6 +776,8 @@ async function recompute() {
       // Sync overlays to new params before rendering.
       syncDxl(p);
       syncFl(p);
+      syncScLine(p, data.crossings);
+      refreshScDxl();
 
       let t0 = tick();
       render3D(data, p.quantity, p.clock, p.cone, p.bimf);
@@ -708,6 +832,7 @@ function readyStatus(p, tag = "") {
 
 function rerenderPlots() {
   if (!lastRender) return;
+  refreshScDxl();
   const { data, quantity, clock, cone, bimf } = lastRender;
   render3D(data, quantity, clock, cone, bimf);
   render2D(data, quantity, clock, bimf);
@@ -1258,7 +1383,12 @@ function wireCrossingsPanel() {
     if (p) {
       applyOmniParams(p);
       computeCache.clear();
-      await recompute();
+      await recompute();   // recompute() re-syncs the SC line for the new crossing
+    } else {
+      // Manual mode: no recompute — resync the SC line to the new crossing and
+      // move the selected-crossing highlight.
+      syncScLine(readParams(), lastRender?.data?.crossings);
+      rerenderPlots();
     }
   });
 
