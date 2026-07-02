@@ -9,13 +9,15 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 4
+      # one version failing must not cancel the rest of the matrix
+      fail-fast: false
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
 
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
@@ -46,4 +48,6 @@ jobs:
         flags: unittests
         name: codecov-umbrella
         yml: ./codecov.yml
-        fail_ci_if_error: true
+        # coverage upload is best-effort: a Codecov outage or token issue
+        # must not fail the test run
+        fail_ci_if_error: false
